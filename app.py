@@ -237,7 +237,7 @@ _DEFAULT_ROLES = {
     "yash":    "admin",
     "sukriti": "executor",
     "finance": "executor",
-    "vijay":   "viewer",
+    "vijay":   "executor",
 }
 
 # ── CSM assignment helpers ────────────────────────────────────────────────────
