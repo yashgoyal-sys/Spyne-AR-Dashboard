@@ -2158,16 +2158,47 @@ _role_now       = st.session_state.get("_role", "viewer")
 _role_label     = ROLE_LABELS.get(_role_now, _role_now.title())
 _role_color     = ROLE_COLORS.get(_role_now, "#64748b")
 
-# Shared banner background injected via CSS on a known class
+# ── Global theme-adaptive CSS ─────────────────────────────────────────────────
 st.markdown("""
 <style>
+/* ── Banner: always dark navy regardless of app theme ──────────────────────── */
 [data-testid="stHorizontalBlock"]:has(> div > [data-testid="stColumn"] > div > .banner-logo) {
-    background: linear-gradient(135deg,#0f172a 0%,#0d2b52 55%,#1e3a8a 100%);
+    background: linear-gradient(135deg,#0f172a 0%,#0d2b52 55%,#1e3a8a 100%) !important;
     border-radius: 14px;
     border: 1px solid rgba(96,165,250,0.15);
     box-shadow: 0 4px 24px rgba(0,0,0,0.35);
     padding: 4px 0;
     margin-bottom: 6px;
+}
+/* Ensure text inside the banner stays white in both light & dark themes */
+[data-testid="stHorizontalBlock"]:has(> div > [data-testid="stColumn"] > div > .banner-logo)
+    [data-testid="stMarkdownContainer"] p,
+[data-testid="stHorizontalBlock"]:has(> div > [data-testid="stColumn"] > div > .banner-logo)
+    [data-testid="stMarkdownContainer"] div {
+    color: inherit !important;
+}
+
+/* ── KPI cards: theme-adaptive via Streamlit CSS vars ──────────────────────── */
+.kpi-card {
+    background: var(--secondary-background-color);
+    border: 1px solid rgba(128,128,128,0.2);
+    border-radius: 10px;
+    padding: 14px 16px;
+}
+.kpi-value {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--text-color);
+}
+.kpi-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 5px;
+    color: var(--text-color);
+    opacity: 0.6;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -2198,14 +2229,15 @@ with _col_title:
     st.markdown(
         f'<div style="padding:14px 0 10px 8px;">'
         f'<div style="color:#f1f5f9;font-size:22px;font-weight:800;'
-        f'letter-spacing:-0.5px;line-height:1.2;">AR Collections Dashboard</div>'
-        f'<div style="color:#64748b;font-size:12px;margin-top:4px;">'
+        f'letter-spacing:-0.5px;line-height:1.2;text-shadow:0 1px 4px rgba(0,0,0,0.4);">'
+        f'AR Collections Dashboard</div>'
+        f'<div style="color:#cbd5e1;font-size:12px;margin-top:4px;">'
         f'Finance Team &nbsp;·&nbsp; Collections &nbsp;·&nbsp; Aging &nbsp;·&nbsp; Reminders'
-        f'&nbsp;&nbsp;<span style="background:rgba(96,165,250,0.12);color:#93c5fd;'
-        f'border:1px solid rgba(96,165,250,0.25);border-radius:20px;'
+        f'&nbsp;&nbsp;<span style="background:rgba(96,165,250,0.18);color:#bfdbfe;'
+        f'border:1px solid rgba(96,165,250,0.35);border-radius:20px;'
         f'padding:2px 10px;font-size:11px;font-weight:600;">👤 {_uname_display}</span>'
-        f'&nbsp;<span style="background:{_role_color}22;color:{_role_color};'
-        f'border:1px solid {_role_color}55;border-radius:20px;'
+        f'&nbsp;<span style="background:{_role_color}33;color:#fff;'
+        f'border:1px solid {_role_color}66;border-radius:20px;'
         f'padding:2px 10px;font-size:11px;font-weight:700;">{_role_label}</span>'
         f'</div></div>',
         unsafe_allow_html=True,
@@ -2222,7 +2254,8 @@ with _col_refresh:
     else:
         st.markdown(
             "<div style='padding:8px 0;text-align:right;'>"
-            "<span style='color:#6b7280;font-size:12px;'>🔒 Read-only access</span>"
+            "<span style='color:#94a3b8;font-size:12px;font-weight:600;"
+            "text-shadow:0 1px 3px rgba(0,0,0,0.3);'>🔒 Read-only</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -2508,12 +2541,10 @@ _kpi_data = [
 _kpi_cols = st.columns(5)
 for _col, (_icon, _label, _val, _accent) in zip(_kpi_cols, _kpi_data):
     _col.markdown(
-        f"<div style='background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);"
-        f"border-radius:10px;padding:14px 16px;'>"
+        f"<div class='kpi-card'>"
         f"<div style='color:{_accent};font-size:20px;margin-bottom:4px;'>{_icon}</div>"
-        f"<div style='color:#f1f5f9;font-size:22px;font-weight:800;line-height:1.1;'>{_val}</div>"
-        f"<div style='color:#64748b;font-size:11px;font-weight:600;text-transform:uppercase;"
-        f"letter-spacing:0.06em;margin-top:4px;'>{_label}</div>"
+        f"<div class='kpi-value' style='color:{_accent};'>{_val}</div>"
+        f"<div class='kpi-label'>{_label}</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
