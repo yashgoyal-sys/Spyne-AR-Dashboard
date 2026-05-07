@@ -131,12 +131,13 @@ DB_PATH      = os.path.join(os.path.dirname(__file__), "reasons.db")
 CREDS_PATH   = os.path.join(os.path.dirname(__file__), "credentials.json")
 
 # ── Role definitions ──────────────────────────────────────────────────────────
-ROLES = ["admin", "executor", "viewer", "management"]
+ROLES = ["admin", "executor", "viewer", "csm", "management"]
 
 ROLE_LABELS = {
     "admin":      "🔑 Admin",
     "executor":   "⚡ Executor",
     "viewer":     "👁 Viewer",
+    "csm":        "🤝 CSM",
     "management": "📊 Management",
 }
 
@@ -144,42 +145,89 @@ ROLE_COLORS = {
     "admin":      "#7c3aed",
     "executor":   "#2563eb",
     "viewer":     "#0891b2",
+    "csm":        "#d97706",
     "management": "#059669",
 }
 
-# What each role can do
+# ─────────────────────────────────────────────────────────────────────────────
+# Permission matrix
+# ─────────────────────────────────────────────────────────────────────────────
+# view_overview     → can see the Overview tab
+# view_reasons      → can see the Reasons & Actions tab
+# invoice_drilldown → can see the Invoice Drilldown tab
+# send_reminders    → can send email reminders
+# edit_reasons      → can save/delete reasons
+# zoho_pull         → can pull live data from Zoho Books
+# refresh_data      → Refresh Data button is shown
+# download          → can download Excel exports
+# manage_users      → can open User Management panel
+# csm_filter        → data is automatically filtered to the user's assigned CSM
+# ─────────────────────────────────────────────────────────────────────────────
 ROLE_PERMISSIONS = {
     "admin": {
-        "send_reminders":    True,   # Send email reminders
-        "edit_reasons":      True,   # Add/edit reasons & actions
-        "zoho_pull":         True,   # Pull data from Zoho Books
-        "invoice_drilldown": True,   # View invoice-level detail
-        "download":          True,   # Download Excel exports
-        "refresh_data":      True,   # Refresh Google Sheet / Zoho
-    },
-    "executor": {
+        "view_overview":     True,
+        "view_reasons":      True,
+        "invoice_drilldown": True,
         "send_reminders":    True,
         "edit_reasons":      True,
         "zoho_pull":         True,
-        "invoice_drilldown": True,
-        "download":          True,
         "refresh_data":      True,
+        "download":          True,
+        "manage_users":      True,
+        "csm_filter":        False,
+    },
+    "executor": {
+        "view_overview":     True,
+        "view_reasons":      True,
+        "invoice_drilldown": True,
+        "send_reminders":    True,
+        "edit_reasons":      True,
+        "zoho_pull":         True,
+        "refresh_data":      True,
+        "download":          True,
+        "manage_users":      False,
+        "csm_filter":        False,
     },
     "viewer": {
-        "send_reminders":    False,  # Read-only — cannot send emails
-        "edit_reasons":      False,  # Cannot add/edit reasons
-        "zoho_pull":         False,
+        # Viewer sees: CSM Summary · Customer Summary · Invoice Drilldown · Reasons & Actions
+        # Viewer cannot: Overview · Send Reminders · Refresh · Zoho pull · edit
+        "view_overview":     False,
+        "view_reasons":      True,
         "invoice_drilldown": True,
-        "download":          True,
-        "refresh_data":      True,
-    },
-    "management": {
-        "send_reminders":    False,  # High-level overview only
+        "send_reminders":    False,
         "edit_reasons":      False,
         "zoho_pull":         False,
-        "invoice_drilldown": False,  # No invoice-level detail
+        "refresh_data":      False,
         "download":          True,
+        "manage_users":      False,
+        "csm_filter":        False,
+    },
+    "csm": {
+        # CSM: same visible tabs as Viewer, but data auto-filtered to their assigned CSM
+        "view_overview":     False,
+        "view_reasons":      True,
+        "invoice_drilldown": True,
+        "send_reminders":    False,
+        "edit_reasons":      False,
+        "zoho_pull":         False,
+        "refresh_data":      False,
+        "download":          True,
+        "manage_users":      False,
+        "csm_filter":        True,   # ← data will be sliced to their CSM name
+    },
+    "management": {
+        # Management sees: Overview · CSM Summary · Customer Summary
+        # Management cannot: Invoice Drilldown · Reasons & Actions · Send Reminders
+        "view_overview":     True,
+        "view_reasons":      False,
+        "invoice_drilldown": False,
+        "send_reminders":    False,
+        "edit_reasons":      False,
+        "zoho_pull":         False,
         "refresh_data":      True,
+        "download":          True,
+        "manage_users":      False,
+        "csm_filter":        False,
     },
 }
 
@@ -191,6 +239,47 @@ _DEFAULT_ROLES = {
     "finance": "executor",
     "vijay":   "viewer",
 }
+
+# ── CSM assignment helpers ────────────────────────────────────────────────────
+def _load_csm_assignments() -> dict:
+    """Return {username: csm_display_name}.
+    Layers: credentials.json → st.secrets [csm_assignments] → SQLite app_users.csm_name.
+    Falls back to using the username itself as the CSM name.
+    """
+    assignments: dict = {}
+    # credentials.json
+    if os.path.exists(CREDS_PATH):
+        try:
+            with open(CREDS_PATH, "r") as f:
+                data = json.load(f)
+            assignments.update({k.lower(): v for k, v in data.get("csm_assignments", {}).items()})
+        except Exception:
+            pass
+    # st.secrets
+    try:
+        if "csm_assignments" in st.secrets:
+            assignments.update({k.lower(): v for k, v in st.secrets["csm_assignments"].items()})
+    except Exception:
+        pass
+    # SQLite (csm_name column — added during User Management)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT username, csm_name FROM app_users WHERE csm_name IS NOT NULL AND csm_name != ''"
+            ).fetchall()
+        for uname, cname in rows:
+            assignments[uname.lower()] = cname
+    except Exception:
+        pass
+    return assignments
+
+
+def _get_csm_name_for_user(username: str) -> str | None:
+    """Return the CSM display name assigned to this username.
+    Falls back to the username itself (title-cased) if no explicit assignment.
+    """
+    assignments = _load_csm_assignments()
+    return assignments.get(username.lower(), username.title())
 
 def _load_roles() -> dict:
     """Return {username: role}.
@@ -1053,14 +1142,20 @@ def init_db():
         # ── User management table ─────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS app_users (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                username     TEXT NOT NULL UNIQUE,
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                username      TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                role         TEXT NOT NULL DEFAULT 'viewer',
-                created_by   TEXT,
-                created_at   TEXT
+                role          TEXT NOT NULL DEFAULT 'viewer',
+                csm_name      TEXT,
+                created_by    TEXT,
+                created_at    TEXT
             )
         """)
+        # Migrate: add csm_name column if upgrading from older schema
+        try:
+            conn.execute("ALTER TABLE app_users ADD COLUMN csm_name TEXT")
+        except Exception:
+            pass
 
 
 def log_email(invoice_nos, customer, to_email, cc_emails, subject, status,
@@ -1110,14 +1205,16 @@ def _db_get_all_users() -> pd.DataFrame:
     with sqlite3.connect(DB_PATH) as conn:
         try:
             return pd.read_sql(
-                "SELECT username, role, created_by, created_at FROM app_users ORDER BY created_at",
+                "SELECT username, role, csm_name, created_by, created_at "
+                "FROM app_users ORDER BY created_at",
                 conn,
             )
         except Exception:
-            return pd.DataFrame(columns=["username", "role", "created_by", "created_at"])
+            return pd.DataFrame(columns=["username", "role", "csm_name", "created_by", "created_at"])
 
 
-def _db_create_user(username: str, password: str, role: str, created_by: str) -> tuple[bool, str]:
+def _db_create_user(username: str, password: str, role: str, created_by: str,
+                    csm_name: str = "") -> tuple[bool, str]:
     """Insert a new user. Returns (success, message)."""
     uname = username.strip().lower()
     if not uname:
@@ -1130,9 +1227,10 @@ def _db_create_user(username: str, password: str, role: str, created_by: str) ->
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO app_users (username, password_hash, role, created_by, created_at) "
-                "VALUES (?,?,?,?,?)",
-                (uname, pw_hash, role, created_by, datetime.now().isoformat()),
+                "INSERT INTO app_users (username, password_hash, role, csm_name, created_by, created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (uname, pw_hash, role, csm_name.strip() or None,
+                 created_by, datetime.now().isoformat()),
             )
         _sync_users_to_credentials()
         return True, f"User **{uname}** created successfully."
@@ -1142,8 +1240,9 @@ def _db_create_user(username: str, password: str, role: str, created_by: str) ->
         return False, f"Error: {e}"
 
 
-def _db_update_user(username: str, new_password: str | None, new_role: str | None) -> tuple[bool, str]:
-    """Update password and/or role for an existing DB user."""
+def _db_update_user(username: str, new_password: str | None, new_role: str | None,
+                    new_csm_name: str | None = None) -> tuple[bool, str]:
+    """Update password, role, and/or CSM name for an existing DB user."""
     uname = username.strip().lower()
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -1153,6 +1252,9 @@ def _db_update_user(username: str, new_password: str | None, new_role: str | Non
             if new_role and new_role in ROLES:
                 conn.execute("UPDATE app_users SET role=? WHERE username=?",
                              (new_role, uname))
+            if new_csm_name is not None:
+                conn.execute("UPDATE app_users SET csm_name=? WHERE username=?",
+                             (new_csm_name.strip() or None, uname))
         _sync_users_to_credentials()
         return True, f"User **{uname}** updated."
     except Exception as e:
@@ -1172,123 +1274,135 @@ def _db_delete_user(username: str) -> tuple[bool, str]:
 
 
 def _sync_users_to_credentials():
-    """Write all DB users + static users back to credentials.json and secrets.toml.
-    This keeps local files (and the Streamlit secrets snippet) in sync.
-    """
-    # Gather DB users
-    db_df = _db_get_all_users()
-    db_roles: dict[str, str] = {}
-    if not db_df.empty:
-        db_roles = dict(zip(db_df["username"], db_df["role"]))
+    """Write all DB users back to credentials.json and secrets.toml (local files only)."""
+    import re as _re
+    # Gather DB data
     db_pw_map: dict[str, str] = {}
+    db_roles:  dict[str, str] = {}
+    db_csm:    dict[str, str] = {}
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            rows = conn.execute("SELECT username, password_hash FROM app_users").fetchall()
-        db_pw_map = {r[0]: r[1] for r in rows}
+            rows = conn.execute(
+                "SELECT username, password_hash, role, csm_name FROM app_users"
+            ).fetchall()
+        for uname, pw_hash, role, csm_name in rows:
+            db_pw_map[uname] = pw_hash
+            db_roles[uname]  = role
+            if csm_name:
+                db_csm[uname] = csm_name
     except Exception:
         pass
 
-    # Merge into credentials.json
+    # ── credentials.json ──────────────────────────────────────────────────────
     if os.path.exists(CREDS_PATH):
         try:
             with open(CREDS_PATH, "r") as f:
                 creds = json.load(f)
         except Exception:
             creds = {}
-        existing_users = creds.get("users", {})
-        existing_roles = creds.get("roles", {})
-        # Add/update DB users (stored as hash values)
-        for uname, pw_hash in db_pw_map.items():
-            existing_users[uname] = pw_hash
-        for uname, role in db_roles.items():
-            existing_roles[uname] = role
-        creds["users"] = existing_users
-        creds["roles"] = existing_roles
+        creds.setdefault("users", {}).update(db_pw_map)
+        creds.setdefault("roles", {}).update(db_roles)
+        creds.setdefault("csm_assignments", {}).update(db_csm)
         try:
             with open(CREDS_PATH, "w") as f:
                 json.dump(creds, f, indent=2)
         except Exception:
             pass
 
-    # Also write secrets.toml if it exists
+    # ── .streamlit/secrets.toml ───────────────────────────────────────────────
     _secrets_path = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
-    if os.path.exists(_secrets_path):
-        try:
-            with open(_secrets_path, "r") as f:
-                toml_text = f.read()
-        except Exception:
-            toml_text = ""
-        # Regenerate [users] and [roles] sections from scratch
-        def _build_toml_section(header: str, mapping: dict) -> str:
-            lines = [header]
-            for k, v in sorted(mapping.items()):
-                lines.append(f'{k:<10}= "{v}"')
-            return "\n".join(lines)
-        # Collect all users and roles from both sources
-        all_users: dict[str, str] = {}
-        all_roles: dict[str, str] = {}
-        # From static: load existing [users] block (keep non-DB entries)
-        import re as _re
-        _u_blk = _re.search(r"\[users\](.*?)(?=\n\[|\Z)", toml_text, _re.S)
-        _r_blk = _re.search(r"\[roles\](.*?)(?=\n\[|\Z)", toml_text, _re.S)
-        if _u_blk:
-            for m in _re.finditer(r'(\w+)\s*=\s*"([^"]*)"', _u_blk.group(1)):
-                all_users[m.group(1).lower()] = m.group(2)
-        if _r_blk:
-            for m in _re.finditer(r'(\w+)\s*=\s*"([^"]*)"', _r_blk.group(1)):
-                all_roles[m.group(1).lower()] = m.group(2)
-        # Overlay DB values
-        for uname, pw_hash in db_pw_map.items():
-            all_users[uname] = pw_hash
-        for uname, role in db_roles.items():
-            all_roles[uname] = role
-        # Rebuild TOML (remove old [users]/[roles] blocks, append new ones)
-        toml_clean = _re.sub(r"\[users\].*?(?=\n\[|\Z)", "", toml_text, flags=_re.S).strip()
-        toml_clean = _re.sub(r"\[roles\].*?(?=\n\[|\Z)", "", toml_clean, flags=_re.S).strip()
-        users_block = _build_toml_section("# ── App Users ──────────────────────────────\n[users]", all_users)
-        roles_block = _build_toml_section("# ── User Roles ─────────────────────────────\n[roles]", all_roles)
-        new_toml = toml_clean + "\n\n" + users_block + "\n\n" + roles_block + "\n"
-        try:
-            with open(_secrets_path, "w") as f:
-                f.write(new_toml)
-        except Exception:
-            pass
+    if not os.path.exists(_secrets_path):
+        return
+    try:
+        with open(_secrets_path, "r") as f:
+            toml_text = f.read()
+    except Exception:
+        toml_text = ""
+
+    def _parse_toml_section(text, section):
+        blk = _re.search(rf"\[{section}\](.*?)(?=\n\[|\Z)", text, _re.S)
+        out = {}
+        if blk:
+            for m in _re.finditer(r'(\w[\w.]*)\s*=\s*"([^"]*)"', blk.group(1)):
+                out[m.group(1).lower()] = m.group(2)
+        return out
+
+    def _build_toml_section(section_name: str, mapping: dict, comment: str = "") -> str:
+        lines = []
+        if comment:
+            lines.append(comment)
+        lines.append(f"[{section_name}]")
+        for k, v in sorted(mapping.items()):
+            lines.append(f'{k:<14}= "{v}"')
+        return "\n".join(lines)
+
+    all_users = _parse_toml_section(toml_text, "users")
+    all_roles = _parse_toml_section(toml_text, "roles")
+    all_csm   = _parse_toml_section(toml_text, "csm_assignments")
+    all_users.update(db_pw_map)
+    all_roles.update(db_roles)
+    all_csm.update(db_csm)
+
+    # Strip old managed sections and rebuild
+    clean = toml_text
+    for sec in ("users", "roles", "csm_assignments"):
+        clean = _re.sub(rf"(?:# ──[^\n]*\n)?\[{sec}\].*?(?=\n\[|\Z)", "", clean, flags=_re.S)
+    clean = clean.strip()
+
+    blocks = [
+        _build_toml_section("users",           all_users, "# ── App Users ────────────────────────────────────"),
+        _build_toml_section("roles",           all_roles, "# ── User Roles ───────────────────────────────────"),
+    ]
+    if all_csm:
+        blocks.append(_build_toml_section("csm_assignments", all_csm,
+                                           "# ── CSM Assignments (username = CSM display name) ──"))
+    try:
+        with open(_secrets_path, "w") as f:
+            f.write(clean + "\n\n" + "\n\n".join(blocks) + "\n")
+    except Exception:
+        pass
 
 
 def _get_secrets_toml_snippet() -> str:
-    """Generate a [users] + [roles] TOML snippet for Streamlit Cloud secrets."""
-    # Collect from DB
-    db_df = _db_get_all_users()
-    db_roles: dict[str, str] = {}
-    if not db_df.empty:
-        db_roles = dict(zip(db_df["username"], db_df["role"]))
-    db_pw_map: dict[str, str] = {}
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            rows = conn.execute("SELECT username, password_hash FROM app_users").fetchall()
-        db_pw_map = {r[0]: r[1] for r in rows}
-    except Exception:
-        pass
-    # Collect from credentials.json static
+    """Generate a [users]+[roles]+[csm_assignments] TOML snippet for Streamlit Cloud."""
     all_users: dict[str, str] = {}
     all_roles: dict[str, str] = {}
+    all_csm:   dict[str, str] = {}
+    # From credentials.json
     if os.path.exists(CREDS_PATH):
         try:
             with open(CREDS_PATH, "r") as f:
                 data = json.load(f)
             all_users.update(data.get("users", {}))
             all_roles.update(data.get("roles", {}))
+            all_csm.update(data.get("csm_assignments", {}))
         except Exception:
             pass
-    all_users.update(db_pw_map)
-    all_roles.update(db_roles)
+    # Overlay DB
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT username, password_hash, role, csm_name FROM app_users"
+            ).fetchall()
+        for uname, pw_hash, role, csm_name in rows:
+            all_users[uname] = pw_hash
+            all_roles[uname] = role
+            if csm_name:
+                all_csm[uname] = csm_name
+    except Exception:
+        pass
+
     lines = ["[users]"]
     for u, pw in sorted(all_users.items()):
-        lines.append(f'{u:<12}= "{pw}"')
-    lines.append("")
-    lines.append("[roles]")
+        lines.append(f'{u:<14}= "{pw}"')
+    lines += ["", "[roles]"]
     for u, role in sorted(all_roles.items()):
-        lines.append(f'{u:<12}= "{role}"')
+        lines.append(f'{u:<14}= "{role}"')
+    if all_csm:
+        lines += ["", "# CSM display name → maps username to the CSM column in your sheet",
+                  "[csm_assignments]"]
+        for u, cname in sorted(all_csm.items()):
+            lines.append(f'{u:<14}= "{cname}"')
     return "\n".join(lines)
 
 
@@ -1814,32 +1928,60 @@ with st.sidebar:
     st.divider()
 
     # ── Admin: User Management panel ──────────────────────────────────────────
-    if _can("send_reminders") and st.session_state.get("_role") == "admin":
+    if _can("manage_users"):
         with st.expander("👥 User Management", expanded=False):
             st.caption("Create, update, or delete users. Changes are saved immediately.")
+
+            # ── Role reference card ──────────────────────────────────────────
+            _role_ref_cols = st.columns(5)
+            _role_desc = {
+                "admin":      "Full access",
+                "executor":   "Operational access",
+                "viewer":     "Read-only (no Overview)",
+                "csm":        "Filtered to own data",
+                "management": "Summary views only",
+            }
+            for _rc, _rname in zip(_role_ref_cols, ROLES):
+                _rc.markdown(
+                    f"<div style='background:{ROLE_COLORS[_rname]}15;border:1px solid "
+                    f"{ROLE_COLORS[_rname]}44;border-radius:8px;padding:6px 8px;text-align:center;'>"
+                    f"<div style='font-size:11px;font-weight:700;color:{ROLE_COLORS[_rname]};'>"
+                    f"{ROLE_LABELS[_rname]}</div>"
+                    f"<div style='font-size:10px;color:#6b7280;margin-top:2px;'>{_role_desc[_rname]}</div>"
+                    f"</div>", unsafe_allow_html=True)
+            st.markdown("")
 
             # ── Create new user ──────────────────────────────────────────────
             st.markdown("#### ➕ Create User")
             with st.form("create_user_form", clear_on_submit=True):
-                _nu_col1, _nu_col2 = st.columns(2)
-                with _nu_col1:
+                _nu_c1, _nu_c2 = st.columns(2)
+                with _nu_c1:
                     _new_uname = st.text_input("Username", placeholder="e.g. ravi")
                     _new_pw    = st.text_input("Password", type="password",
                                                placeholder="min 4 chars")
-                with _nu_col2:
+                with _nu_c2:
                     _new_role  = st.selectbox("Role", ROLES,
                                               format_func=lambda r: ROLE_LABELS.get(r, r.title()),
-                                              index=2)  # default viewer
-                    st.markdown("<div style='padding-top:20px'></div>", unsafe_allow_html=True)
+                                              index=ROLES.index("viewer"))
+                    _new_csm_name = st.text_input(
+                        "CSM Name (only for CSM role)",
+                        placeholder="Exact name as in sheet's CSM column",
+                        help="Required when role = CSM. Must match the CSM column value exactly."
+                    )
                 _create_btn = st.form_submit_button("✅ Create User",
                                                     use_container_width=True, type="primary")
             if _create_btn:
                 _ok, _msg = _db_create_user(
                     _new_uname, _new_pw, _new_role,
                     created_by=st.session_state.get("_username", "admin"),
+                    csm_name=_new_csm_name,
                 )
                 if _ok:
                     st.success(_msg)
+                    if _new_role == "csm" and not _new_csm_name.strip():
+                        st.warning("⚠️ You created a CSM user without a CSM Name. "
+                                   "Edit the user below to assign their CSM name, "
+                                   "or data will fall back to their username.")
                 else:
                     st.error(_msg)
                 st.rerun()
@@ -1850,61 +1992,64 @@ with st.sidebar:
             st.markdown("#### 👤 All Users")
             _all_db = _db_get_all_users()
 
-            # Build combined view: static sources + DB
-            _static_users = {}
+            # Merge static + DB for display
+            _static_roles = {}
             if os.path.exists(CREDS_PATH):
                 try:
                     with open(CREDS_PATH, "r") as _f:
-                        _static_users = json.load(_f).get("roles", {})
+                        _static_roles = json.load(_f).get("roles", {})
                 except Exception:
                     pass
             try:
                 if "roles" in st.secrets:
-                    _static_users.update(dict(st.secrets["roles"]))
+                    _static_roles.update(dict(st.secrets["roles"]))
             except Exception:
                 pass
-            # DB users override static
             _db_unames = set(_all_db["username"].tolist()) if not _all_db.empty else set()
-            _combined_rows = []
-            for _u, _r in {**_DEFAULT_ROLES, **_static_users}.items():
-                if _u not in _db_unames:
-                    _combined_rows.append({"Username": _u, "Role": _r, "Source": "config", "Created By": "—", "Created At": "—"})
-            if not _all_db.empty:
-                for _, _row in _all_db.iterrows():
-                    _combined_rows.append({
-                        "Username":    _row["username"],
-                        "Role":        _row["role"],
-                        "Source":      "db (editable)",
-                        "Created By":  _row.get("created_by", "—"),
-                        "Created At":  str(_row.get("created_at", ""))[:16],
-                    })
-            _combined_df = pd.DataFrame(_combined_rows) if _combined_rows else pd.DataFrame(
-                columns=["Username","Role","Source","Created By","Created At"])
 
-            # Colour-code roles
             def _role_tag(role: str) -> str:
                 clr = ROLE_COLORS.get(role, "#64748b")
                 lbl = ROLE_LABELS.get(role, role.title())
-                return f'<span style="background:{clr}22;color:{clr};border:1px solid {clr}55;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;">{lbl}</span>'
+                return (f'<span style="background:{clr}22;color:{clr};border:1px solid {clr}55;'
+                        f'border-radius:10px;padding:1px 8px;font-size:11px;font-weight:700;">{lbl}</span>')
 
-            for _, _row in _combined_df.iterrows():
+            # Static config users (non-editable)
+            _any_static = False
+            for _u, _r in sorted({**_DEFAULT_ROLES, **_static_roles}.items()):
+                if _u in _db_unames:
+                    continue
+                _any_static = True
                 _uc1, _uc2, _uc3 = st.columns([3, 3, 2])
                 with _uc1:
-                    _src_badge = "🔒" if _row["Source"] == "config" else "✏️"
-                    st.markdown(f"{_src_badge} **{_row['Username']}**  \n<small style='color:#6b7280'>by {_row['Created By']} · {_row['Created At']}</small>",
+                    st.markdown(f"🔒 **{_u}**  \n<small style='color:#6b7280;'>static config</small>",
                                 unsafe_allow_html=True)
                 with _uc2:
-                    st.markdown(_role_tag(_row["Role"]), unsafe_allow_html=True)
+                    st.markdown(_role_tag(_r), unsafe_allow_html=True)
                 with _uc3:
-                    if _row["Source"] == "db (editable)":
-                        if st.button("🗑 Delete", key=f"del_{_row['Username']}",
+                    st.caption("(config only)")
+
+            # DB users (editable)
+            if not _all_db.empty:
+                for _, _row in _all_db.iterrows():
+                    _uc1, _uc2, _uc3 = st.columns([3, 3, 2])
+                    with _uc1:
+                        _csm_hint = ""
+                        if _row["role"] == "csm" and _row.get("csm_name"):
+                            _csm_hint = f" · CSM: *{_row['csm_name']}*"
+                        st.markdown(
+                            f"✏️ **{_row['username']}**{_csm_hint}  \n"
+                            f"<small style='color:#6b7280;'>by {_row.get('created_by','—')} "
+                            f"· {str(_row.get('created_at',''))[:16]}</small>",
+                            unsafe_allow_html=True)
+                    with _uc2:
+                        st.markdown(_role_tag(_row["role"]), unsafe_allow_html=True)
+                    with _uc3:
+                        if st.button("🗑 Delete", key=f"del_{_row['username']}",
                                      use_container_width=True):
-                            _ok2, _msg2 = _db_delete_user(_row["Username"])
+                            _ok2, _msg2 = _db_delete_user(_row["username"])
                             st.toast(_msg2, icon="✅" if _ok2 else "❌")
                             st.rerun()
-                    else:
-                        st.caption("(static config)")
-                st.markdown("---")
+                    st.markdown("---")
 
             # ── Edit DB user ─────────────────────────────────────────────────
             if not _all_db.empty:
@@ -1914,18 +2059,24 @@ with st.sidebar:
                                                options=sorted(_all_db["username"].tolist()))
                     _eu_c1, _eu_c2 = st.columns(2)
                     with _eu_c1:
-                        _new_pw2 = st.text_input("New Password (leave blank to keep)",
-                                                  type="password")
+                        _new_pw2      = st.text_input("New Password (leave blank to keep)",
+                                                       type="password")
+                        _new_csm_nm2  = st.text_input(
+                            "CSM Name (leave blank to keep)",
+                            placeholder="Exact name from CSM column in sheet",
+                        )
                     with _eu_c2:
-                        _new_role2 = st.selectbox("New Role", ROLES,
-                                                   format_func=lambda r: ROLE_LABELS.get(r, r.title()))
-                    _edit_btn = st.form_submit_button("💾 Save Changes",
-                                                       use_container_width=True)
+                        _new_role2 = st.selectbox(
+                            "New Role", ROLES,
+                            format_func=lambda r: ROLE_LABELS.get(r, r.title()),
+                        )
+                    _edit_btn = st.form_submit_button("💾 Save Changes", use_container_width=True)
                 if _edit_btn:
                     _ok3, _msg3 = _db_update_user(
                         _edit_uname,
                         _new_pw2 or None,
                         _new_role2,
+                        new_csm_name=_new_csm_nm2 if _new_csm_nm2.strip() else None,
                     )
                     if _ok3:
                         st.success(_msg3)
@@ -1937,7 +2088,10 @@ with st.sidebar:
 
             # ── Streamlit Cloud secrets snippet ──────────────────────────────
             st.markdown("#### ☁️ Streamlit Cloud Secrets")
-            st.caption("Copy this into **Settings → Secrets** on Streamlit Cloud to persist all users.")
+            st.caption(
+                "Paste this into **App Settings → Secrets** on Streamlit Cloud "
+                "so users persist across redeploys."
+            )
             _snippet = _get_secrets_toml_snippet()
             st.code(_snippet, language="toml")
 
@@ -2010,11 +2164,19 @@ with _col_title:
 
 with _col_refresh:
     st.markdown("<div style='padding-top:14px;'></div>", unsafe_allow_html=True)
-    if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
-        fetch_gsheet.clear()
-        st.session_state.pop("_gs_file_bytes", None)
-        st.session_state["_gs_last_refresh"] = None
-        st.rerun()
+    if _can("refresh_data"):
+        if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
+            fetch_gsheet.clear()
+            st.session_state.pop("_gs_file_bytes", None)
+            st.session_state["_gs_last_refresh"] = None
+            st.rerun()
+    else:
+        st.markdown(
+            "<div style='padding:8px 0;text-align:right;'>"
+            "<span style='color:#6b7280;font-size:12px;'>🔒 Read-only access</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
 # ── Data source selector ──────────────────────────────────────────────────────
 from datetime import timezone, timedelta
@@ -2164,6 +2326,21 @@ else:
 if "balance" in df.columns:
     df = df[df["balance"].fillna(0) > 0].copy()
 
+# ── CSM role: restrict data to the user's assigned CSM ────────────────────────
+if _can("csm_filter") and "CSM" in df.columns:
+    _csm_user     = st.session_state.get("_username", "")
+    _csm_assigned = _get_csm_name_for_user(_csm_user)
+    # Case-insensitive match against the CSM column
+    _csm_mask = df["CSM"].astype(str).str.strip().str.lower() == _csm_assigned.strip().lower()
+    if _csm_mask.any():
+        df = df[_csm_mask].copy()
+    else:
+        # No match — show warning but don't lock out entirely
+        st.warning(
+            f"⚠️ No data found for CSM **{_csm_assigned}** (your assigned CSM name). "
+            "Ask an Admin to set your CSM assignment correctly in User Management."
+        )
+
 # Note: Invoice Status filtering is handled by the sidebar multiselect (default: overdue + sent)
 
 # ─── Column presence helpers ──────────────────────────────────────────────────
@@ -2308,6 +2485,11 @@ tab_overview, tab_csm, tab_customer, tab_invoices, tab_reasons, tab_email = st.t
 
 # ─────────────────────────── TAB 1 · OVERVIEW ────────────────────────────────
 with tab_overview:
+    if not _can("view_overview"):
+        st.info("📈 The Overview dashboard is not available for your role. "
+                "You have access to CSM Summary, Customer Summary, Invoice Drilldown, "
+                "and Reasons & Actions.")
+        st.stop()
     total_inr   = fdf["Outstanding"].sum() if "Outstanding" in fdf.columns else 0
     n_invoices  = len(fdf)
     n_customers = fdf["customer_name"].nunique() if "customer_name" in fdf.columns else 0
@@ -2930,8 +3112,12 @@ with tab_invoices:
 
 # ─────────────────────────── TAB 4 · REASONS & ACTIONS ───────────────────────
 with tab_reasons:
+    if not _can("view_reasons"):
+        st.info("📝 Reasons & Actions is not available for your role. "
+                "Please contact an Admin if you need access.")
+        st.stop()
     if not _can("edit_reasons"):
-        st.info("👁 You have view-only access to Reasons & Actions.")
+        st.info("👁 You have view-only access. Saving and deleting reasons requires Admin or Executor access.")
     rt1, rt2, rt3 = st.tabs(["🧾 Invoice Level", "🏢 Customer Level", "👤 CSM Level"])
 
     with rt1:
