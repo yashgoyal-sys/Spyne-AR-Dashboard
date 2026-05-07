@@ -193,22 +193,32 @@ _DEFAULT_ROLES = {
 }
 
 def _load_roles() -> dict:
-    """Return {username: role} from st.secrets or credentials.json."""
-    roles = {}
-    try:
-        if "roles" in st.secrets:
-            roles = {k.lower(): v.lower() for k, v in st.secrets["roles"].items()}
-    except Exception:
-        pass
-    if not roles and os.path.exists(CREDS_PATH):
+    """Return {username: role}.
+    Layers (lowest → highest priority): defaults → credentials.json → st.secrets → SQLite DB.
+    """
+    roles = _DEFAULT_ROLES.copy()
+    # credentials.json
+    if os.path.exists(CREDS_PATH):
         try:
             with open(CREDS_PATH, "r") as f:
                 data = json.load(f)
-            roles = {k.lower(): v.lower() for k, v in data.get("roles", {}).items()}
+            roles.update({k.lower(): v.lower() for k, v in data.get("roles", {}).items()})
         except Exception:
             pass
-    if not roles:
-        roles = _DEFAULT_ROLES.copy()
+    # st.secrets
+    try:
+        if "roles" in st.secrets:
+            roles.update({k.lower(): v.lower() for k, v in st.secrets["roles"].items()})
+    except Exception:
+        pass
+    # SQLite (highest priority — set by admin via UI)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute("SELECT username, role FROM app_users").fetchall()
+        for uname, role in rows:
+            roles[uname.lower()] = role.lower()
+    except Exception:
+        pass
     return roles
 
 def _get_role(username: str) -> str:
@@ -229,26 +239,32 @@ def _hash_pw(password: str) -> str:
     return hashlib.sha256(password.strip().encode()).hexdigest()
 
 def _load_users() -> dict:
-    """Return {username: hashed_password} from st.secrets or credentials.json."""
+    """Return {username: hashed_password}.
+    Priority (highest → lowest):
+      1. app_users SQLite table  (created via User Management panel)
+      2. st.secrets [users]      (Streamlit Cloud)
+      3. credentials.json users  (local dev)
+      4. Hard-coded fallback
+    All layers are merged so every source contributes; DB always wins on conflict.
+    """
     users = {}
-    # 1. st.secrets (Streamlit Cloud)
-    try:
-        if "users" in st.secrets:
-            for uname, pw in st.secrets["users"].items():
-                # support both plain and pre-hashed (64-char hex) passwords
-                users[uname.lower()] = pw if len(pw) == 64 else _hash_pw(pw)
-    except Exception:
-        pass
-    # 2. credentials.json (local dev)
-    if not users and os.path.exists(CREDS_PATH):
+    # 3. credentials.json (local dev)
+    if os.path.exists(CREDS_PATH):
         try:
             with open(CREDS_PATH, "r") as f:
                 data = json.load(f)
             for uname, pw in data.get("users", {}).items():
-                users[uname.lower()] = pw if len(pw) == 64 else _hash_pw(pw)
+                users[uname.lower()] = pw if len(str(pw)) == 64 else _hash_pw(str(pw))
         except Exception:
             pass
-    # 3. Hard-coded fallback — covers all authorised users
+    # 2. st.secrets (Streamlit Cloud) — merge, secrets win over credentials.json
+    try:
+        if "users" in st.secrets:
+            for uname, pw in st.secrets["users"].items():
+                users[uname.lower()] = pw if len(str(pw)) == 64 else _hash_pw(str(pw))
+    except Exception:
+        pass
+    # Hard-coded fallback (only if nothing loaded yet)
     if not users:
         _default_pw = _hash_pw("spyne@2024")
         users = {
@@ -258,6 +274,14 @@ def _load_users() -> dict:
             "finance": _default_pw,
             "vijay":   _hash_pw("vijay@2026"),
         }
+    # 1. SQLite app_users — always wins (applied last, overwrites anything above)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute("SELECT username, password_hash FROM app_users").fetchall()
+        for uname, pw_hash in rows:
+            users[uname.lower()] = pw_hash
+    except Exception:
+        pass
     return users
 
 def _login_page():
@@ -329,7 +353,15 @@ def load_credentials():
 
 
 def save_credentials():
-    """Write current sidebar credentials to disk."""
+    """Write current sidebar credentials to disk (preserves users/roles already in file)."""
+    # Load existing to preserve users & roles
+    existing = {}
+    if os.path.exists(CREDS_PATH):
+        try:
+            with open(CREDS_PATH, "r") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
     creds = {
         "gmail": {
             "smtp_user":   st.session_state.get("smtp_user",   ""),
@@ -344,6 +376,9 @@ def save_credentials():
             "zoho_client_secret": st.session_state.get("zoho_client_secret", ""),
             "zoho_refresh_token": st.session_state.get("zoho_refresh_token", ""),
         },
+        # Preserve users & roles sections unchanged
+        "users": existing.get("users", {}),
+        "roles": existing.get("roles", {}),
     }
     with open(CREDS_PATH, "w") as f:
         json.dump(creds, f, indent=2)
@@ -1015,6 +1050,17 @@ def init_db():
             conn.execute("ALTER TABLE sent_emails ADD COLUMN template TEXT")
         except Exception:
             pass  # column already exists
+        # ── User management table ─────────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_users (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                username     TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role         TEXT NOT NULL DEFAULT 'viewer',
+                created_by   TEXT,
+                created_at   TEXT
+            )
+        """)
 
 
 def log_email(invoice_nos, customer, to_email, cc_emails, subject, status,
@@ -1056,6 +1102,194 @@ def get_reminder_counts() -> dict:
     if df.empty:
         return {}
     return dict(zip(df["invoice_no"], df["cnt"]))
+
+
+# ── User management DB helpers ────────────────────────────────────────────────
+def _db_get_all_users() -> pd.DataFrame:
+    """Return all users stored in app_users SQLite table."""
+    with sqlite3.connect(DB_PATH) as conn:
+        try:
+            return pd.read_sql(
+                "SELECT username, role, created_by, created_at FROM app_users ORDER BY created_at",
+                conn,
+            )
+        except Exception:
+            return pd.DataFrame(columns=["username", "role", "created_by", "created_at"])
+
+
+def _db_create_user(username: str, password: str, role: str, created_by: str) -> tuple[bool, str]:
+    """Insert a new user. Returns (success, message)."""
+    uname = username.strip().lower()
+    if not uname:
+        return False, "Username cannot be empty."
+    if len(password) < 4:
+        return False, "Password must be at least 4 characters."
+    if role not in ROLES:
+        return False, f"Invalid role: {role}"
+    pw_hash = _hash_pw(password)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO app_users (username, password_hash, role, created_by, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (uname, pw_hash, role, created_by, datetime.now().isoformat()),
+            )
+        _sync_users_to_credentials()
+        return True, f"User **{uname}** created successfully."
+    except sqlite3.IntegrityError:
+        return False, f"Username **{uname}** already exists."
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def _db_update_user(username: str, new_password: str | None, new_role: str | None) -> tuple[bool, str]:
+    """Update password and/or role for an existing DB user."""
+    uname = username.strip().lower()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            if new_password:
+                conn.execute("UPDATE app_users SET password_hash=? WHERE username=?",
+                             (_hash_pw(new_password), uname))
+            if new_role and new_role in ROLES:
+                conn.execute("UPDATE app_users SET role=? WHERE username=?",
+                             (new_role, uname))
+        _sync_users_to_credentials()
+        return True, f"User **{uname}** updated."
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def _db_delete_user(username: str) -> tuple[bool, str]:
+    """Delete a user from app_users table."""
+    uname = username.strip().lower()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM app_users WHERE username=?", (uname,))
+        _sync_users_to_credentials()
+        return True, f"User **{uname}** deleted."
+    except Exception as e:
+        return False, f"Error: {e}"
+
+
+def _sync_users_to_credentials():
+    """Write all DB users + static users back to credentials.json and secrets.toml.
+    This keeps local files (and the Streamlit secrets snippet) in sync.
+    """
+    # Gather DB users
+    db_df = _db_get_all_users()
+    db_roles: dict[str, str] = {}
+    if not db_df.empty:
+        db_roles = dict(zip(db_df["username"], db_df["role"]))
+    db_pw_map: dict[str, str] = {}
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute("SELECT username, password_hash FROM app_users").fetchall()
+        db_pw_map = {r[0]: r[1] for r in rows}
+    except Exception:
+        pass
+
+    # Merge into credentials.json
+    if os.path.exists(CREDS_PATH):
+        try:
+            with open(CREDS_PATH, "r") as f:
+                creds = json.load(f)
+        except Exception:
+            creds = {}
+        existing_users = creds.get("users", {})
+        existing_roles = creds.get("roles", {})
+        # Add/update DB users (stored as hash values)
+        for uname, pw_hash in db_pw_map.items():
+            existing_users[uname] = pw_hash
+        for uname, role in db_roles.items():
+            existing_roles[uname] = role
+        creds["users"] = existing_users
+        creds["roles"] = existing_roles
+        try:
+            with open(CREDS_PATH, "w") as f:
+                json.dump(creds, f, indent=2)
+        except Exception:
+            pass
+
+    # Also write secrets.toml if it exists
+    _secrets_path = os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml")
+    if os.path.exists(_secrets_path):
+        try:
+            with open(_secrets_path, "r") as f:
+                toml_text = f.read()
+        except Exception:
+            toml_text = ""
+        # Regenerate [users] and [roles] sections from scratch
+        def _build_toml_section(header: str, mapping: dict) -> str:
+            lines = [header]
+            for k, v in sorted(mapping.items()):
+                lines.append(f'{k:<10}= "{v}"')
+            return "\n".join(lines)
+        # Collect all users and roles from both sources
+        all_users: dict[str, str] = {}
+        all_roles: dict[str, str] = {}
+        # From static: load existing [users] block (keep non-DB entries)
+        import re as _re
+        _u_blk = _re.search(r"\[users\](.*?)(?=\n\[|\Z)", toml_text, _re.S)
+        _r_blk = _re.search(r"\[roles\](.*?)(?=\n\[|\Z)", toml_text, _re.S)
+        if _u_blk:
+            for m in _re.finditer(r'(\w+)\s*=\s*"([^"]*)"', _u_blk.group(1)):
+                all_users[m.group(1).lower()] = m.group(2)
+        if _r_blk:
+            for m in _re.finditer(r'(\w+)\s*=\s*"([^"]*)"', _r_blk.group(1)):
+                all_roles[m.group(1).lower()] = m.group(2)
+        # Overlay DB values
+        for uname, pw_hash in db_pw_map.items():
+            all_users[uname] = pw_hash
+        for uname, role in db_roles.items():
+            all_roles[uname] = role
+        # Rebuild TOML (remove old [users]/[roles] blocks, append new ones)
+        toml_clean = _re.sub(r"\[users\].*?(?=\n\[|\Z)", "", toml_text, flags=_re.S).strip()
+        toml_clean = _re.sub(r"\[roles\].*?(?=\n\[|\Z)", "", toml_clean, flags=_re.S).strip()
+        users_block = _build_toml_section("# ── App Users ──────────────────────────────\n[users]", all_users)
+        roles_block = _build_toml_section("# ── User Roles ─────────────────────────────\n[roles]", all_roles)
+        new_toml = toml_clean + "\n\n" + users_block + "\n\n" + roles_block + "\n"
+        try:
+            with open(_secrets_path, "w") as f:
+                f.write(new_toml)
+        except Exception:
+            pass
+
+
+def _get_secrets_toml_snippet() -> str:
+    """Generate a [users] + [roles] TOML snippet for Streamlit Cloud secrets."""
+    # Collect from DB
+    db_df = _db_get_all_users()
+    db_roles: dict[str, str] = {}
+    if not db_df.empty:
+        db_roles = dict(zip(db_df["username"], db_df["role"]))
+    db_pw_map: dict[str, str] = {}
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute("SELECT username, password_hash FROM app_users").fetchall()
+        db_pw_map = {r[0]: r[1] for r in rows}
+    except Exception:
+        pass
+    # Collect from credentials.json static
+    all_users: dict[str, str] = {}
+    all_roles: dict[str, str] = {}
+    if os.path.exists(CREDS_PATH):
+        try:
+            with open(CREDS_PATH, "r") as f:
+                data = json.load(f)
+            all_users.update(data.get("users", {}))
+            all_roles.update(data.get("roles", {}))
+        except Exception:
+            pass
+    all_users.update(db_pw_map)
+    all_roles.update(db_roles)
+    lines = ["[users]"]
+    for u, pw in sorted(all_users.items()):
+        lines.append(f'{u:<12}= "{pw}"')
+    lines.append("")
+    lines.append("[roles]")
+    for u, role in sorted(all_roles.items()):
+        lines.append(f'{u:<12}= "{role}"')
+    return "\n".join(lines)
 
 
 def upsert_reason(level, identifier, category, text, owner, next_dt):
@@ -1577,6 +1811,136 @@ with st.sidebar:
         st.session_state["_authenticated"] = False
         st.session_state["_username"]      = ""
         st.rerun()
+    st.divider()
+
+    # ── Admin: User Management panel ──────────────────────────────────────────
+    if _can("send_reminders") and st.session_state.get("_role") == "admin":
+        with st.expander("👥 User Management", expanded=False):
+            st.caption("Create, update, or delete users. Changes are saved immediately.")
+
+            # ── Create new user ──────────────────────────────────────────────
+            st.markdown("#### ➕ Create User")
+            with st.form("create_user_form", clear_on_submit=True):
+                _nu_col1, _nu_col2 = st.columns(2)
+                with _nu_col1:
+                    _new_uname = st.text_input("Username", placeholder="e.g. ravi")
+                    _new_pw    = st.text_input("Password", type="password",
+                                               placeholder="min 4 chars")
+                with _nu_col2:
+                    _new_role  = st.selectbox("Role", ROLES,
+                                              format_func=lambda r: ROLE_LABELS.get(r, r.title()),
+                                              index=2)  # default viewer
+                    st.markdown("<div style='padding-top:20px'></div>", unsafe_allow_html=True)
+                _create_btn = st.form_submit_button("✅ Create User",
+                                                    use_container_width=True, type="primary")
+            if _create_btn:
+                _ok, _msg = _db_create_user(
+                    _new_uname, _new_pw, _new_role,
+                    created_by=st.session_state.get("_username", "admin"),
+                )
+                if _ok:
+                    st.success(_msg)
+                else:
+                    st.error(_msg)
+                st.rerun()
+
+            st.divider()
+
+            # ── Current users table ──────────────────────────────────────────
+            st.markdown("#### 👤 All Users")
+            _all_db = _db_get_all_users()
+
+            # Build combined view: static sources + DB
+            _static_users = {}
+            if os.path.exists(CREDS_PATH):
+                try:
+                    with open(CREDS_PATH, "r") as _f:
+                        _static_users = json.load(_f).get("roles", {})
+                except Exception:
+                    pass
+            try:
+                if "roles" in st.secrets:
+                    _static_users.update(dict(st.secrets["roles"]))
+            except Exception:
+                pass
+            # DB users override static
+            _db_unames = set(_all_db["username"].tolist()) if not _all_db.empty else set()
+            _combined_rows = []
+            for _u, _r in {**_DEFAULT_ROLES, **_static_users}.items():
+                if _u not in _db_unames:
+                    _combined_rows.append({"Username": _u, "Role": _r, "Source": "config", "Created By": "—", "Created At": "—"})
+            if not _all_db.empty:
+                for _, _row in _all_db.iterrows():
+                    _combined_rows.append({
+                        "Username":    _row["username"],
+                        "Role":        _row["role"],
+                        "Source":      "db (editable)",
+                        "Created By":  _row.get("created_by", "—"),
+                        "Created At":  str(_row.get("created_at", ""))[:16],
+                    })
+            _combined_df = pd.DataFrame(_combined_rows) if _combined_rows else pd.DataFrame(
+                columns=["Username","Role","Source","Created By","Created At"])
+
+            # Colour-code roles
+            def _role_tag(role: str) -> str:
+                clr = ROLE_COLORS.get(role, "#64748b")
+                lbl = ROLE_LABELS.get(role, role.title())
+                return f'<span style="background:{clr}22;color:{clr};border:1px solid {clr}55;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;">{lbl}</span>'
+
+            for _, _row in _combined_df.iterrows():
+                _uc1, _uc2, _uc3 = st.columns([3, 3, 2])
+                with _uc1:
+                    _src_badge = "🔒" if _row["Source"] == "config" else "✏️"
+                    st.markdown(f"{_src_badge} **{_row['Username']}**  \n<small style='color:#6b7280'>by {_row['Created By']} · {_row['Created At']}</small>",
+                                unsafe_allow_html=True)
+                with _uc2:
+                    st.markdown(_role_tag(_row["Role"]), unsafe_allow_html=True)
+                with _uc3:
+                    if _row["Source"] == "db (editable)":
+                        if st.button("🗑 Delete", key=f"del_{_row['Username']}",
+                                     use_container_width=True):
+                            _ok2, _msg2 = _db_delete_user(_row["Username"])
+                            st.toast(_msg2, icon="✅" if _ok2 else "❌")
+                            st.rerun()
+                    else:
+                        st.caption("(static config)")
+                st.markdown("---")
+
+            # ── Edit DB user ─────────────────────────────────────────────────
+            if not _all_db.empty:
+                st.markdown("#### ✏️ Edit DB User")
+                with st.form("edit_user_form", clear_on_submit=True):
+                    _edit_uname = st.selectbox("User to edit",
+                                               options=sorted(_all_db["username"].tolist()))
+                    _eu_c1, _eu_c2 = st.columns(2)
+                    with _eu_c1:
+                        _new_pw2 = st.text_input("New Password (leave blank to keep)",
+                                                  type="password")
+                    with _eu_c2:
+                        _new_role2 = st.selectbox("New Role", ROLES,
+                                                   format_func=lambda r: ROLE_LABELS.get(r, r.title()))
+                    _edit_btn = st.form_submit_button("💾 Save Changes",
+                                                       use_container_width=True)
+                if _edit_btn:
+                    _ok3, _msg3 = _db_update_user(
+                        _edit_uname,
+                        _new_pw2 or None,
+                        _new_role2,
+                    )
+                    if _ok3:
+                        st.success(_msg3)
+                    else:
+                        st.error(_msg3)
+                    st.rerun()
+
+            st.divider()
+
+            # ── Streamlit Cloud secrets snippet ──────────────────────────────
+            st.markdown("#### ☁️ Streamlit Cloud Secrets")
+            st.caption("Copy this into **Settings → Secrets** on Streamlit Cloud to persist all users.")
+            _snippet = _get_secrets_toml_snippet()
+            st.code(_snippet, language="toml")
+
     st.divider()
 
 # ── Fixed Google Sheet ────────────────────────────────────────────────────────
