@@ -1927,6 +1927,55 @@ with st.sidebar:
         st.rerun()
     st.divider()
 
+    # ── Change Password (available to every logged-in user) ───────────────────
+    with st.expander("🔒 Change Password", expanded=False):
+        with st.form("change_pw_form", clear_on_submit=True):
+            _cp_current = st.text_input("Current Password", type="password")
+            _cp_new1    = st.text_input("New Password",     type="password")
+            _cp_new2    = st.text_input("Confirm New Password", type="password")
+            _cp_submit  = st.form_submit_button("✅ Update Password",
+                                                use_container_width=True, type="primary")
+        if _cp_submit:
+            _cp_uname = st.session_state.get("_username", "")
+            # Validate current password
+            if _load_users().get(_cp_uname) != _hash_pw(_cp_current):
+                st.error("❌ Current password is incorrect.")
+            elif len(_cp_new1) < 4:
+                st.error("❌ New password must be at least 4 characters.")
+            elif _cp_new1 != _cp_new2:
+                st.error("❌ New passwords do not match.")
+            elif _cp_new1 == _cp_current:
+                st.warning("⚠️ New password is the same as the current one.")
+            else:
+                # Check if user exists in DB
+                try:
+                    with sqlite3.connect(DB_PATH) as _cpconn:
+                        _exists = _cpconn.execute(
+                            "SELECT 1 FROM app_users WHERE username=?", (_cp_uname,)
+                        ).fetchone()
+                    if _exists:
+                        # Update existing DB record
+                        with sqlite3.connect(DB_PATH) as _cpconn:
+                            _cpconn.execute(
+                                "UPDATE app_users SET password_hash=? WHERE username=?",
+                                (_hash_pw(_cp_new1), _cp_uname),
+                            )
+                    else:
+                        # Static config user — insert into DB so the change persists
+                        _cur_role = st.session_state.get("_role", "viewer")
+                        with sqlite3.connect(DB_PATH) as _cpconn:
+                            _cpconn.execute(
+                                "INSERT INTO app_users "
+                                "(username, password_hash, role, created_by, created_at) "
+                                "VALUES (?,?,?,?,?)",
+                                (_cp_uname, _hash_pw(_cp_new1), _cur_role,
+                                 _cp_uname, datetime.now().isoformat()),
+                            )
+                    _sync_users_to_credentials()
+                    st.success("✅ Password updated successfully!")
+                except Exception as _cpe:
+                    st.error(f"❌ Failed to update password: {_cpe}")
+
     # ── Admin: User Management panel ──────────────────────────────────────────
     if _can("manage_users"):
         with st.expander("👥 User Management", expanded=False):
