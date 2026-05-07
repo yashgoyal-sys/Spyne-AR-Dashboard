@@ -2489,193 +2489,193 @@ with tab_overview:
         st.info("📈 The Overview dashboard is not available for your role. "
                 "You have access to CSM Summary, Customer Summary, Invoice Drilldown, "
                 "and Reasons & Actions.")
-        st.stop()
-    total_inr   = fdf["Outstanding"].sum() if "Outstanding" in fdf.columns else 0
-    n_invoices  = len(fdf)
-    n_customers = fdf["customer_name"].nunique() if "customer_name" in fdf.columns else 0
-    n_csms      = fdf["CSM"].nunique()           if "CSM"           in fdf.columns else 0
+    else:
+        total_inr   = fdf["Outstanding"].sum() if "Outstanding" in fdf.columns else 0
+        n_invoices  = len(fdf)
+        n_customers = fdf["customer_name"].nunique() if "customer_name" in fdf.columns else 0
+        n_csms      = fdf["CSM"].nunique()           if "CSM"           in fdf.columns else 0
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Outstanding (INR)", fmt_inr(total_inr))
-    k2.metric("Invoices",          f"{n_invoices:,}")
-    k3.metric("Customers",         f"{n_customers:,}")
-    k4.metric("CSMs",              f"{n_csms:,}")
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Outstanding (INR)", fmt_inr(total_inr))
+        k2.metric("Invoices",          f"{n_invoices:,}")
+        k3.metric("Customers",         f"{n_customers:,}")
+        k4.metric("CSMs",              f"{n_csms:,}")
 
-    st.divider()
-    c1, c2 = st.columns(2)
+        st.divider()
+        c1, c2 = st.columns(2)
 
-    with c1:
-        if "RAG" in fdf.columns:
-            rag_data = fdf.groupby("RAG")["Final USD"].sum().reset_index()
-            fig = px.pie(
-                rag_data, values="Final USD", names="RAG",
-                title="Outstanding by RAG Status",
-                color="RAG",
-                color_discrete_map=RAG_COLORS,
-                hole=0.4,
-            )
-            fig.update_traces(textinfo="percent+label")
-            st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+        with c1:
+            if "RAG" in fdf.columns:
+                rag_data = fdf.groupby("RAG")["Final USD"].sum().reset_index()
+                fig = px.pie(
+                    rag_data, values="Final USD", names="RAG",
+                    title="Outstanding by RAG Status",
+                    color="RAG",
+                    color_discrete_map=RAG_COLORS,
+                    hole=0.4,
+                )
+                fig.update_traces(textinfo="percent+label")
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
 
-    with c2:
+        with c2:
+            if "Bucket" in fdf.columns and "RAG" in fdf.columns:
+                bucket_rag = (
+                    fdf.groupby(["Bucket", "RAG"])["Final USD"]
+                    .sum()
+                    .reset_index()
+                )
+                # Enforce correct bucket order
+                bucket_rag["Bucket"] = pd.Categorical(bucket_rag["Bucket"], categories=BUCKET_ORDER, ordered=True)
+                bucket_rag = bucket_rag.sort_values("Bucket")
+                fig = px.bar(
+                    bucket_rag, x="Bucket", y="Final USD", color="RAG",
+                    title="Outstanding by Aging Bucket & RAG",
+                    color_discrete_map=RAG_COLORS,
+                    category_orders={"Bucket": BUCKET_ORDER, "RAG": ["Green", "Amber", "Red"]},
+                    text_auto=",.0f",
+                )
+                fig.update_layout(xaxis_title="", yaxis_title="USD", legend_title="RAG")
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+
+        st.divider()
+
+        # ── Bucket × RAG summary table ────────────────────────────────────────────
         if "Bucket" in fdf.columns and "RAG" in fdf.columns:
-            bucket_rag = (
+            st.subheader("Aging Bucket × RAG Breakdown")
+            pivot = (
                 fdf.groupby(["Bucket", "RAG"])["Final USD"]
                 .sum()
-                .reset_index()
+                .unstack(fill_value=0)
+                .reindex(BUCKET_ORDER)
             )
-            # Enforce correct bucket order
-            bucket_rag["Bucket"] = pd.Categorical(bucket_rag["Bucket"], categories=BUCKET_ORDER, ordered=True)
-            bucket_rag = bucket_rag.sort_values("Bucket")
-            fig = px.bar(
-                bucket_rag, x="Bucket", y="Final USD", color="RAG",
-                title="Outstanding by Aging Bucket & RAG",
-                color_discrete_map=RAG_COLORS,
-                category_orders={"Bucket": BUCKET_ORDER, "RAG": ["Green", "Amber", "Red"]},
-                text_auto=",.0f",
-            )
-            fig.update_layout(xaxis_title="", yaxis_title="USD", legend_title="RAG")
-            st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+            # Add totals
+            for col in ["Red", "Amber", "Green"]:
+                if col not in pivot.columns:
+                    pivot[col] = 0
+            pivot = pivot[["Green", "Amber", "Red"]]
+            pivot["Total"] = pivot.sum(axis=1)
+            pivot.loc["Grand Total"] = pivot.sum()
 
-    st.divider()
-
-    # ── Bucket × RAG summary table ────────────────────────────────────────────
-    if "Bucket" in fdf.columns and "RAG" in fdf.columns:
-        st.subheader("Aging Bucket × RAG Breakdown")
-        pivot = (
-            fdf.groupby(["Bucket", "RAG"])["Final USD"]
-            .sum()
-            .unstack(fill_value=0)
-            .reindex(BUCKET_ORDER)
-        )
-        # Add totals
-        for col in ["Red", "Amber", "Green"]:
-            if col not in pivot.columns:
-                pivot[col] = 0
-        pivot = pivot[["Green", "Amber", "Red"]]
-        pivot["Total"] = pivot.sum(axis=1)
-        pivot.loc["Grand Total"] = pivot.sum()
-
-        fmt_map = {c: "${:,.0f}" for c in pivot.columns}
-        def _col_color(col):
-            colors = {"Green": "color:#10b981;font-weight:600",
-                      "Amber": "color:#f59e0b;font-weight:600",
-                      "Red":   "color:#ef4444;font-weight:600"}
-            return [colors.get(col.name, "")] * len(col)
-
-        styled = pivot.style.format(fmt_map).apply(_col_color, axis=0)
-        st.dataframe(styled, use_container_width=True)
-
-    c3, c4 = st.columns(2)
-
-    with c3:
-        if "country" in fdf.columns:
-            country_data = (fdf.groupby("country")["Final USD"].sum()
-                             .reset_index()
-                             .sort_values("Final USD", ascending=False)
-                             .head(10))
-            fig = px.bar(country_data, x="Final USD", y="country",
-                         orientation="h", title="Top 10 Countries by Outstanding",
-                         text_auto=",.0f")
-            fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
-            st.plotly_chart(_fmt_fig(fig), use_container_width=True)
-
-    with c4:
-        if "Product" in fdf.columns:
-            product_data = (fdf.groupby("Product")["Final USD"].sum()
-                              .reset_index()
-                              .sort_values("Final USD", ascending=False)
-                              .head(10))
-            fig = px.bar(product_data, x="Final USD", y="Product",
-                         orientation="h", title="Top 10 Products by Outstanding",
-                         text_auto=",.0f")
-            fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
-            st.plotly_chart(_fmt_fig(fig), use_container_width=True)
-
-    # ── Currency-wise outstanding (FC) with RAG ───────────────────────────────
-    if "currency_code" in fdf.columns and "balance" in fdf.columns and "RAG" in fdf.columns:
-        st.divider()
-        st.subheader("Currency-wise Outstanding (FC) by RAG")
-
-        curr_rag = (
-            fdf.groupby(["currency_code", "RAG"])["balance"]
-            .sum()
-            .reset_index()
-            .sort_values("balance", ascending=False)
-        )
-
-        cc1, cc2 = st.columns(2)
-
-        with cc1:
-            fig = px.bar(
-                curr_rag, x="currency_code", y="balance", color="RAG",
-                title="FC Outstanding by Currency & RAG",
-                color_discrete_map=RAG_COLORS,
-                category_orders={"RAG": ["Green", "Amber", "Red"]},
-                text_auto=",.0f",
-            )
-            fig.update_layout(
-                xaxis_title="Currency", yaxis_title="FC Amount",
-                legend_title="RAG", xaxis_tickangle=-30,
-            )
-            st.plotly_chart(_fmt_fig(fig), use_container_width=True)
-
-        with cc2:
-            # Pivot: currency rows × RAG columns
-            pivot_curr = (
-                curr_rag.pivot_table(index="currency_code", columns="RAG",
-                                     values="balance", aggfunc="sum", fill_value=0)
-                .reset_index()
-            )
-            for r in ["Green", "Amber", "Red"]:
-                if r not in pivot_curr.columns:
-                    pivot_curr[r] = 0
-            pivot_curr = pivot_curr[["currency_code", "Green", "Amber", "Red"]]
-            pivot_curr["Total (FC)"] = pivot_curr[["Green","Amber","Red"]].sum(axis=1)
-            pivot_curr = pivot_curr.sort_values("Total (FC)", ascending=False)
-
-            # Append totals row
-            totals = {"currency_code": "Grand Total",
-                      "Green": pivot_curr["Green"].sum(),
-                      "Amber": pivot_curr["Amber"].sum(),
-                      "Red":   pivot_curr["Red"].sum(),
-                      "Total (FC)": pivot_curr["Total (FC)"].sum()}
-            pivot_curr = pd.concat([pivot_curr, pd.DataFrame([totals])], ignore_index=True)
-
-            CURRENCY_SYMBOLS = {
-                "INR": "₹", "USD": "$", "EUR": "€", "GBP": "£",
-                "AUD": "A$", "CAD": "C$", "NZD": "NZ$", "SGD": "S$",
-                "HKD": "HK$", "JPY": "¥", "CNY": "¥", "CHF": "CHF ",
-                "NOK": "kr ", "SEK": "kr ", "DKK": "kr ", "AED": "AED ",
-                "SAR": "﷼", "MYR": "RM ", "THB": "฿", "IDR": "Rp ",
-                "PHP": "₱", "KRW": "₩", "BRL": "R$", "MXN": "MX$",
-                "ZAR": "R ",
-            }
-
-            def fmt_currency_val(val, currency):
-                sym = CURRENCY_SYMBOLS.get(str(currency).upper(), "")
-                return f"{sym}{val:,.0f}"
-
-            def _rag_style(col):
-                colors = {"Green": "color:#34d399;font-weight:600",
-                          "Amber": "color:#fbbf24;font-weight:600",
-                          "Red":   "color:#f87171;font-weight:600"}
+            fmt_map = {c: "${:,.0f}" for c in pivot.columns}
+            def _col_color(col):
+                colors = {"Green": "color:#10b981;font-weight:600",
+                          "Amber": "color:#f59e0b;font-weight:600",
+                          "Red":   "color:#ef4444;font-weight:600"}
                 return [colors.get(col.name, "")] * len(col)
 
-            # Format each row with its own currency symbol
-            display_curr = pivot_curr.rename(columns={"currency_code": "Currency"}).copy()
-            for num_col in ["Green", "Amber", "Red", "Total (FC)"]:
-                display_curr[num_col] = display_curr.apply(
-                    lambda r: fmt_currency_val(r[num_col],
-                        r["Currency"] if r["Currency"] != "Grand Total" else ""),
-                    axis=1,
-                )
+            styled = pivot.style.format(fmt_map).apply(_col_color, axis=0)
+            st.dataframe(styled, use_container_width=True)
 
-            st.dataframe(
-                display_curr.style.apply(_rag_style, axis=0),
-                use_container_width=True,
-                hide_index=True,
+        c3, c4 = st.columns(2)
+
+        with c3:
+            if "country" in fdf.columns:
+                country_data = (fdf.groupby("country")["Final USD"].sum()
+                                 .reset_index()
+                                 .sort_values("Final USD", ascending=False)
+                                 .head(10))
+                fig = px.bar(country_data, x="Final USD", y="country",
+                             orientation="h", title="Top 10 Countries by Outstanding",
+                             text_auto=",.0f")
+                fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+
+        with c4:
+            if "Product" in fdf.columns:
+                product_data = (fdf.groupby("Product")["Final USD"].sum()
+                                  .reset_index()
+                                  .sort_values("Final USD", ascending=False)
+                                  .head(10))
+                fig = px.bar(product_data, x="Final USD", y="Product",
+                             orientation="h", title="Top 10 Products by Outstanding",
+                             text_auto=",.0f")
+                fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+
+        # ── Currency-wise outstanding (FC) with RAG ───────────────────────────────
+        if "currency_code" in fdf.columns and "balance" in fdf.columns and "RAG" in fdf.columns:
+            st.divider()
+            st.subheader("Currency-wise Outstanding (FC) by RAG")
+
+            curr_rag = (
+                fdf.groupby(["currency_code", "RAG"])["balance"]
+                .sum()
+                .reset_index()
+                .sort_values("balance", ascending=False)
             )
+
+            cc1, cc2 = st.columns(2)
+
+            with cc1:
+                fig = px.bar(
+                    curr_rag, x="currency_code", y="balance", color="RAG",
+                    title="FC Outstanding by Currency & RAG",
+                    color_discrete_map=RAG_COLORS,
+                    category_orders={"RAG": ["Green", "Amber", "Red"]},
+                    text_auto=",.0f",
+                )
+                fig.update_layout(
+                    xaxis_title="Currency", yaxis_title="FC Amount",
+                    legend_title="RAG", xaxis_tickangle=-30,
+                )
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+
+            with cc2:
+                # Pivot: currency rows × RAG columns
+                pivot_curr = (
+                    curr_rag.pivot_table(index="currency_code", columns="RAG",
+                                         values="balance", aggfunc="sum", fill_value=0)
+                    .reset_index()
+                )
+                for r in ["Green", "Amber", "Red"]:
+                    if r not in pivot_curr.columns:
+                        pivot_curr[r] = 0
+                pivot_curr = pivot_curr[["currency_code", "Green", "Amber", "Red"]]
+                pivot_curr["Total (FC)"] = pivot_curr[["Green","Amber","Red"]].sum(axis=1)
+                pivot_curr = pivot_curr.sort_values("Total (FC)", ascending=False)
+
+                # Append totals row
+                totals = {"currency_code": "Grand Total",
+                          "Green": pivot_curr["Green"].sum(),
+                          "Amber": pivot_curr["Amber"].sum(),
+                          "Red":   pivot_curr["Red"].sum(),
+                          "Total (FC)": pivot_curr["Total (FC)"].sum()}
+                pivot_curr = pd.concat([pivot_curr, pd.DataFrame([totals])], ignore_index=True)
+
+                CURRENCY_SYMBOLS = {
+                    "INR": "₹", "USD": "$", "EUR": "€", "GBP": "£",
+                    "AUD": "A$", "CAD": "C$", "NZD": "NZ$", "SGD": "S$",
+                    "HKD": "HK$", "JPY": "¥", "CNY": "¥", "CHF": "CHF ",
+                    "NOK": "kr ", "SEK": "kr ", "DKK": "kr ", "AED": "AED ",
+                    "SAR": "﷼", "MYR": "RM ", "THB": "฿", "IDR": "Rp ",
+                    "PHP": "₱", "KRW": "₩", "BRL": "R$", "MXN": "MX$",
+                    "ZAR": "R ",
+                }
+
+                def fmt_currency_val(val, currency):
+                    sym = CURRENCY_SYMBOLS.get(str(currency).upper(), "")
+                    return f"{sym}{val:,.0f}"
+
+                def _rag_style(col):
+                    colors = {"Green": "color:#34d399;font-weight:600",
+                              "Amber": "color:#fbbf24;font-weight:600",
+                              "Red":   "color:#f87171;font-weight:600"}
+                    return [colors.get(col.name, "")] * len(col)
+
+                # Format each row with its own currency symbol
+                display_curr = pivot_curr.rename(columns={"currency_code": "Currency"}).copy()
+                for num_col in ["Green", "Amber", "Red", "Total (FC)"]:
+                    display_curr[num_col] = display_curr.apply(
+                        lambda r: fmt_currency_val(r[num_col],
+                            r["Currency"] if r["Currency"] != "Grand Total" else ""),
+                        axis=1,
+                    )
+
+                st.dataframe(
+                    display_curr.style.apply(_rag_style, axis=0),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
 # ─────────────────────────── TAB 2 · CSM SUMMARY ─────────────────────────────
 with tab_csm:
@@ -2981,807 +2981,807 @@ with tab_invoices:
     if not _can("invoice_drilldown"):
         st.info("📊 Invoice-level detail is not available for your role. "
                 "Please contact an Admin if you need access.")
-        st.stop()
-    f1, f2, f3, f4 = st.columns(4)
-    with f1:
-        inv_csm = st.multiselect("CSM", sorted(fdf["CSM"].dropna().unique()), key="inv_csm")
-    with f2:
-        inv_rag = st.multiselect("RAG", sorted(fdf["RAG"].dropna().unique()) if "RAG" in fdf.columns else [], key="inv_rag")
-    with f3:
-        inv_bkt = st.multiselect("Bucket", [b for b in BUCKET_ORDER if b in fdf.get("Bucket", pd.Series()).values], key="inv_bkt")
-    with f4:
-        inv_status = st.multiselect("Status", sorted(fdf["Status"].dropna().unique()) if "Status" in fdf.columns else [], key="inv_status")
-
-    filtered = fdf.copy()
-    if inv_csm:    filtered = filtered[filtered["CSM"].isin(inv_csm)]
-    if inv_rag:    filtered = filtered[filtered["RAG"].isin(inv_rag)]
-    if inv_bkt:    filtered = filtered[filtered["Bucket"].isin(inv_bkt)]
-    if inv_status: filtered = filtered[filtered["Status"].isin(inv_status)]
-
-    if "balance" in filtered.columns and len(filtered):
-        min_v, max_v = float(filtered["balance"].min()), float(filtered["balance"].max())
-        if min_v < max_v:
-            rng = st.slider("Filter by Balance Amount (FC)", min_v, max_v, (min_v, max_v), step=100.0)
-            filtered = filtered[(filtered["balance"] >= rng[0]) & (filtered["balance"] <= rng[1])]
-
-    total_inr_disp = fmt_inr(filtered["Outstanding"].sum()) if "Outstanding" in filtered.columns else "—"
-    st.caption(f"Showing **{len(filtered):,}** invoices — Outstanding (INR): **{total_inr_disp}**")
-
-    # ── Merge saved invoice-level reasons into the table ──────────────────────
-    inv_reasons = get_reasons("invoice")
-    base_cols = [c for c in [
-        "invoice_number", "customer_name", "CSM",
-        "currency_code", "balance",               # native currency amount
-        "Aging", "Bucket", "RAG", "due_date", "Status",
-        "Product", "country", "Billing Terms", "Service Type",
-    ] if c in filtered.columns]
-
-    display = filtered[base_cols].sort_values("balance", ascending=False).copy()
-    display["invoice_number"] = display["invoice_number"].astype(str)
-
-    # ── Reminder count per invoice ────────────────────────────────────────────
-    _reminder_counts = get_reminder_counts()
-    display["Reminders Sent"] = display["invoice_number"].map(_reminder_counts).fillna(0).astype(int)
-
-    # Build a formatted "Amount" column: currency symbol + balance
-    if "balance" in display.columns and "currency_code" in display.columns:
-        display["Amount"] = display.apply(
-            lambda r: f"{CURR_SYM.get(str(r['currency_code']).upper(), '')}{r['balance']:,.0f}",
-            axis=1,
-        )
-        # keep balance as numeric for sort/slider but show Amount as the readable column
-        display = display.drop(columns=["balance"])
-        # reorder: put Amount right after CSM
-        cols_order = ["invoice_number","customer_name","CSM","Amount","currency_code",
-                      "Aging","Bucket","RAG","due_date","Status",
-                      "Product","country","Billing Terms","Service Type"]
-        display = display[[c for c in cols_order if c in display.columns]]
-
-    # Attach existing reason columns
-    if not inv_reasons.empty:
-        inv_reasons = inv_reasons.rename(columns={
-            "identifier":      "invoice_number",
-            "reason_category": "Reason Category",
-            "reason_text":     "Notes",
-            "action_owner":    "Action Owner",
-            "next_action_date":"Next Action Date",
-        })[["invoice_number","Reason Category","Notes","Action Owner","Next Action Date"]]
-        display = display.merge(inv_reasons, on="invoice_number", how="left")
     else:
-        display["Reason Category"] = None
-        display["Notes"]           = None
-        display["Action Owner"]    = None
-        display["Next Action Date"]= None
+        f1, f2, f3, f4 = st.columns(4)
+        with f1:
+            inv_csm = st.multiselect("CSM", sorted(fdf["CSM"].dropna().unique()), key="inv_csm")
+        with f2:
+            inv_rag = st.multiselect("RAG", sorted(fdf["RAG"].dropna().unique()) if "RAG" in fdf.columns else [], key="inv_rag")
+        with f3:
+            inv_bkt = st.multiselect("Bucket", [b for b in BUCKET_ORDER if b in fdf.get("Bucket", pd.Series()).values], key="inv_bkt")
+        with f4:
+            inv_status = st.multiselect("Status", sorted(fdf["Status"].dropna().unique()) if "Status" in fdf.columns else [], key="inv_status")
 
-    display["Reason Category"]  = display["Reason Category"].astype(str).replace("nan","")
-    display["Notes"]            = display["Notes"].astype(str).replace("nan","")
-    display["Action Owner"]     = display["Action Owner"].astype(str).replace("nan","")
-    display["Next Action Date"] = display["Next Action Date"].astype(str).replace("nan","")
+        filtered = fdf.copy()
+        if inv_csm:    filtered = filtered[filtered["CSM"].isin(inv_csm)]
+        if inv_rag:    filtered = filtered[filtered["RAG"].isin(inv_rag)]
+        if inv_bkt:    filtered = filtered[filtered["Bucket"].isin(inv_bkt)]
+        if inv_status: filtered = filtered[filtered["Status"].isin(inv_status)]
 
-    # ── Column filters ────────────────────────────────────────────────────────
-    display = column_filters(display, key_prefix="inv_dd")
+        if "balance" in filtered.columns and len(filtered):
+            min_v, max_v = float(filtered["balance"].min()), float(filtered["balance"].max())
+            if min_v < max_v:
+                rng = st.slider("Filter by Balance Amount (FC)", min_v, max_v, (min_v, max_v), step=100.0)
+                filtered = filtered[(filtered["balance"] >= rng[0]) & (filtered["balance"] <= rng[1])]
 
-    # ── Editable table ────────────────────────────────────────────────────────
-    st.info("Edit **Reason Category**, **Notes**, **Action Owner**, and **Next Action Date** inline. Click **Save Changes** when done.")
+        total_inr_disp = fmt_inr(filtered["Outstanding"].sum()) if "Outstanding" in filtered.columns else "—"
+        st.caption(f"Showing **{len(filtered):,}** invoices — Outstanding (INR): **{total_inr_disp}**")
 
-    edited = st.data_editor(
-        display,
-        use_container_width=True,
-        height=480,
-        disabled=[c for c in display.columns if c not in
-                  ["Reason Category", "Notes", "Action Owner", "Next Action Date"]],
-        column_config={
-            "Amount":    st.column_config.TextColumn("Amount (FC)"),
-            "Aging":     st.column_config.NumberColumn("Aging (days)", format="%d"),
-            "due_date":  st.column_config.DateColumn("Due Date"),
-            "Reason Category": st.column_config.SelectboxColumn(
-                "Reason Category",
-                options=[""] + REASON_CATEGORIES,
-                required=False,
-            ),
-            "Notes":           st.column_config.TextColumn("Notes", max_chars=500),
-            "Action Owner":    st.column_config.TextColumn("Action Owner"),
-            "Next Action Date":st.column_config.TextColumn("Next Action Date", help="YYYY-MM-DD"),
-        },
-        key="invoice_editor",
-    )
+        # ── Merge saved invoice-level reasons into the table ──────────────────────
+        inv_reasons = get_reasons("invoice")
+        base_cols = [c for c in [
+            "invoice_number", "customer_name", "CSM",
+            "currency_code", "balance",               # native currency amount
+            "Aging", "Bucket", "RAG", "due_date", "Status",
+            "Product", "country", "Billing Terms", "Service Type",
+        ] if c in filtered.columns]
 
-    if st.button("💾 Save Changes", type="primary", key="save_inv"):
-        saved, skipped = 0, 0
-        for _, row in edited.iterrows():
-            inv = str(row["invoice_number"])
-            cat   = str(row.get("Reason Category", "") or "")
-            notes = str(row.get("Notes", "") or "")
-            owner = str(row.get("Action Owner", "") or "")
-            ndate = str(row.get("Next Action Date", "") or "")
-            if any([cat, notes, owner, ndate]):
-                try:
-                    upsert_reason("invoice", inv, cat, notes, owner, ndate)
-                    saved += 1
-                except Exception:
-                    skipped += 1
-        st.success(f"Saved {saved} invoice reason(s)." + (f" {skipped} skipped." if skipped else ""))
-        st.rerun()
+        display = filtered[base_cols].sort_values("balance", ascending=False).copy()
+        display["invoice_number"] = display["invoice_number"].astype(str)
 
-    st.download_button(
-        "⬇ Download with Reasons",
-        data=export_excel(edited),
-        file_name="invoices_with_reasons.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+        # ── Reminder count per invoice ────────────────────────────────────────────
+        _reminder_counts = get_reminder_counts()
+        display["Reminders Sent"] = display["invoice_number"].map(_reminder_counts).fillna(0).astype(int)
+
+        # Build a formatted "Amount" column: currency symbol + balance
+        if "balance" in display.columns and "currency_code" in display.columns:
+            display["Amount"] = display.apply(
+                lambda r: f"{CURR_SYM.get(str(r['currency_code']).upper(), '')}{r['balance']:,.0f}",
+                axis=1,
+            )
+            # keep balance as numeric for sort/slider but show Amount as the readable column
+            display = display.drop(columns=["balance"])
+            # reorder: put Amount right after CSM
+            cols_order = ["invoice_number","customer_name","CSM","Amount","currency_code",
+                          "Aging","Bucket","RAG","due_date","Status",
+                          "Product","country","Billing Terms","Service Type"]
+            display = display[[c for c in cols_order if c in display.columns]]
+
+        # Attach existing reason columns
+        if not inv_reasons.empty:
+            inv_reasons = inv_reasons.rename(columns={
+                "identifier":      "invoice_number",
+                "reason_category": "Reason Category",
+                "reason_text":     "Notes",
+                "action_owner":    "Action Owner",
+                "next_action_date":"Next Action Date",
+            })[["invoice_number","Reason Category","Notes","Action Owner","Next Action Date"]]
+            display = display.merge(inv_reasons, on="invoice_number", how="left")
+        else:
+            display["Reason Category"] = None
+            display["Notes"]           = None
+            display["Action Owner"]    = None
+            display["Next Action Date"]= None
+
+        display["Reason Category"]  = display["Reason Category"].astype(str).replace("nan","")
+        display["Notes"]            = display["Notes"].astype(str).replace("nan","")
+        display["Action Owner"]     = display["Action Owner"].astype(str).replace("nan","")
+        display["Next Action Date"] = display["Next Action Date"].astype(str).replace("nan","")
+
+        # ── Column filters ────────────────────────────────────────────────────────
+        display = column_filters(display, key_prefix="inv_dd")
+
+        # ── Editable table ────────────────────────────────────────────────────────
+        st.info("Edit **Reason Category**, **Notes**, **Action Owner**, and **Next Action Date** inline. Click **Save Changes** when done.")
+
+        edited = st.data_editor(
+            display,
+            use_container_width=True,
+            height=480,
+            disabled=[c for c in display.columns if c not in
+                      ["Reason Category", "Notes", "Action Owner", "Next Action Date"]],
+            column_config={
+                "Amount":    st.column_config.TextColumn("Amount (FC)"),
+                "Aging":     st.column_config.NumberColumn("Aging (days)", format="%d"),
+                "due_date":  st.column_config.DateColumn("Due Date"),
+                "Reason Category": st.column_config.SelectboxColumn(
+                    "Reason Category",
+                    options=[""] + REASON_CATEGORIES,
+                    required=False,
+                ),
+                "Notes":           st.column_config.TextColumn("Notes", max_chars=500),
+                "Action Owner":    st.column_config.TextColumn("Action Owner"),
+                "Next Action Date":st.column_config.TextColumn("Next Action Date", help="YYYY-MM-DD"),
+            },
+            key="invoice_editor",
+        )
+
+        if st.button("💾 Save Changes", type="primary", key="save_inv"):
+            saved, skipped = 0, 0
+            for _, row in edited.iterrows():
+                inv = str(row["invoice_number"])
+                cat   = str(row.get("Reason Category", "") or "")
+                notes = str(row.get("Notes", "") or "")
+                owner = str(row.get("Action Owner", "") or "")
+                ndate = str(row.get("Next Action Date", "") or "")
+                if any([cat, notes, owner, ndate]):
+                    try:
+                        upsert_reason("invoice", inv, cat, notes, owner, ndate)
+                        saved += 1
+                    except Exception:
+                        skipped += 1
+            st.success(f"Saved {saved} invoice reason(s)." + (f" {skipped} skipped." if skipped else ""))
+            st.rerun()
+
+        st.download_button(
+            "⬇ Download with Reasons",
+            data=export_excel(edited),
+            file_name="invoices_with_reasons.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
 # ─────────────────────────── TAB 4 · REASONS & ACTIONS ───────────────────────
 with tab_reasons:
     if not _can("view_reasons"):
         st.info("📝 Reasons & Actions is not available for your role. "
                 "Please contact an Admin if you need access.")
-        st.stop()
-    if not _can("edit_reasons"):
-        st.info("👁 You have view-only access. Saving and deleting reasons requires Admin or Executor access.")
-    rt1, rt2, rt3 = st.tabs(["🧾 Invoice Level", "🏢 Customer Level", "👤 CSM Level"])
+    else:
+        if not _can("edit_reasons"):
+            st.info("👁 You have view-only access. Saving and deleting reasons requires Admin or Executor access.")
+        rt1, rt2, rt3 = st.tabs(["🧾 Invoice Level", "🏢 Customer Level", "👤 CSM Level"])
 
-    with rt1:
-        st.markdown("Mark a reason / action for a specific **invoice**.")
-        reason_form("invoice", df["invoice_number"].dropna().unique(), "Invoice")
+        with rt1:
+            st.markdown("Mark a reason / action for a specific **invoice**.")
+            reason_form("invoice", df["invoice_number"].dropna().unique(), "Invoice")
 
-    with rt2:
-        st.markdown("Mark a reason / action for a specific **customer**.")
-        reason_form("customer", df["customer_name"].dropna().unique(), "Customer", df_ref=fdf)
+        with rt2:
+            st.markdown("Mark a reason / action for a specific **customer**.")
+            reason_form("customer", df["customer_name"].dropna().unique(), "Customer", df_ref=fdf)
 
-    with rt3:
-        st.markdown("Mark a reason / action for a specific **CSM**.")
-        reason_form("csm", df["CSM"].dropna().unique(), "CSM")
+        with rt3:
+            st.markdown("Mark a reason / action for a specific **CSM**.")
+            reason_form("csm", df["CSM"].dropna().unique(), "CSM")
 
 # ─────────────────────────── TAB 5 · SEND REMINDERS ─────────────────────────
 with tab_email:
     if not _can("send_reminders"):
         st.info("📧 Sending reminders is not available for your role. "
                 "Please contact an Admin or Executor if you need to send emails.")
-        st.stop()
-
-    smtp_ready = all([SMTP_CFG.get("user"), SMTP_CFG.get("password")])
-    if not smtp_ready:
-        st.warning("⚙️ Gmail credentials not configured. Add `smtp_user` and `smtp_pass` to your Streamlit secrets.")
-
-    # ── Column availability hint ───────────────────────────────────────────────
-    _cc_detected = "Customer CC Email" in fdf.columns
-    if _cc_detected:
-        _cc_populated = fdf["Customer CC Email"].astype(str).str.strip().replace({"nan":"","None":""}).ne("").sum()
-        st.success(f"✅ **Customer CC Email** column detected — {_cc_populated} invoice row(s) have a CC address.")
     else:
-        # Show raw column names so user can spot the mismatch
-        _raw_cols = [c for c in fdf.columns if "cc" in c.lower() or "customer" in c.lower()]
-        _hint = f"Columns with 'customer'/'cc': `{', '.join(_raw_cols)}`" if _raw_cols else "No matching columns found."
-        st.warning(f"⚠️ **Customer CC Email** column not found in sheet. {_hint}")
 
-    # ── Template & recipient config (shared across both sub-tabs) ─────────────
-    cfg1, cfg2 = st.columns([2, 3])
-    with cfg1:
-        selected_template = st.selectbox(
-            "📋 Email Template",
-            list(TEMPLATES.keys()),
-            help="Choose the tone and content of your email",
-        )
-        template_key = TEMPLATES[selected_template]
+        smtp_ready = all([SMTP_CFG.get("user"), SMTP_CFG.get("password")])
+        if not smtp_ready:
+            st.warning("⚙️ Gmail credentials not configured. Add `smtp_user` and `smtp_pass` to your Streamlit secrets.")
 
-    with cfg2:
-        st.markdown("**Recipients**")
-        rc1, rc2, rc3, rc4 = st.columns(4)
-        send_to_customer = rc1.checkbox("✉️ Customer",         value=True, key="rc_customer")
-        send_to_csm      = rc2.checkbox("👤 CSM",              value=True, key="rc_csm")
-        send_to_finance  = rc3.checkbox("🏦 finance@spyne.ai", value=True, key="rc_finance")
-        send_to_other    = rc4.checkbox("📨 Other",            value=False, key="rc_other")
+        # ── Column availability hint ───────────────────────────────────────────────
+        _cc_detected = "Customer CC Email" in fdf.columns
+        if _cc_detected:
+            _cc_populated = fdf["Customer CC Email"].astype(str).str.strip().replace({"nan":"","None":""}).ne("").sum()
+            st.success(f"✅ **Customer CC Email** column detected — {_cc_populated} invoice row(s) have a CC address.")
+        else:
+            # Show raw column names so user can spot the mismatch
+            _raw_cols = [c for c in fdf.columns if "cc" in c.lower() or "customer" in c.lower()]
+            _hint = f"Columns with 'customer'/'cc': `{', '.join(_raw_cols)}`" if _raw_cols else "No matching columns found."
+            st.warning(f"⚠️ **Customer CC Email** column not found in sheet. {_hint}")
 
-        other_email = ""
-        if send_to_other:
-            other_email = st.text_input(
-                "Additional email address",
-                placeholder="e.g. manager@company.com",
-                key="rc_other_email",
-                label_visibility="collapsed",
-            ).strip()
-            if send_to_other and other_email and "@" not in other_email:
-                st.warning("⚠️ Enter a valid email address for the additional recipient.")
-
-        if not any([send_to_customer, send_to_csm, send_to_finance,
-                    (send_to_other and other_email and "@" in other_email)]):
-            st.error("Select at least one recipient.")
-
-    st.divider()
-    et1, et2, et3 = st.tabs(["🏢 By Customer", "🧾 By Invoice", "📋 Sent Log"])
-
-    def _build_cc(csm_email: str, customer_cc: str = "") -> list:
-        """Build CC list based on recipient toggles + optional customer CC email(s)."""
-        cc = []
-        if send_to_csm and csm_email and "@" in csm_email:
-            cc.append(csm_email)
-        if send_to_finance:
-            cc.append(FINANCE_CC)
-        if send_to_other and other_email and "@" in other_email:
-            cc.append(other_email)
-        # Customer CC Email column — may contain multiple addresses separated by comma/semicolon
-        for addr in re.split(r"[,;]+", str(customer_cc or "")):
-            addr = addr.strip()
-            if addr and "@" in addr and addr not in cc:
-                cc.append(addr)
-        return cc
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SUB-TAB A · CUSTOMER LEVEL (consolidated — one email per customer)
-    # ═══════════════════════════════════════════════════════════════════════════
-    with et1:
-        st.markdown(f"Using template: **{selected_template}** · One consolidated email per customer with all outstanding invoices.")
-
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            c_csm = st.multiselect("CSM",    sorted(fdf["CSM"].dropna().unique())    if "CSM"    in fdf.columns else [], key="c_csm")
-        with c2:
-            c_rag = st.multiselect("RAG",    sorted(fdf["RAG"].dropna().unique())    if "RAG"    in fdf.columns else [], key="c_rag")
-        with c3:
-            c_bkt = st.multiselect("Bucket", [b for b in BUCKET_ORDER if b in fdf.get("Bucket", pd.Series()).values], key="c_bkt")
-        with c4:
-            _cis_opts = (sorted(fdf["Current Invoice Status"].astype(str).str.strip().dropna().unique())
-                         if "Current Invoice Status" in fdf.columns else [])
-            c_inv_status = st.multiselect("Invoice Status", _cis_opts, key="c_inv_status")
-
-        cf = fdf.copy()
-        if c_csm:       cf = cf[cf["CSM"].isin(c_csm)]
-        if c_rag:       cf = cf[cf["RAG"].isin(c_rag)]
-        if c_bkt:       cf = cf[cf["Bucket"].isin(c_bkt)]
-        if c_inv_status and "Current Invoice Status" in cf.columns:
-            cf = cf[cf["Current Invoice Status"].isin(c_inv_status)]
-        if "email" in cf.columns:
-            cf = cf[cf["email"].notna() & (cf["email"].str.strip() != "")]
-
-        if "customer_name" in cf.columns:
-            # Only include columns that actually exist in cf
-            agg_dict = {}
-            if "email"          in cf.columns: agg_dict["Email"]     = ("email",          "first")
-            if "CSM"            in cf.columns: agg_dict["CSM"]       = ("CSM",            "first")
-            if "RAG"            in cf.columns: agg_dict["RAG"]       = ("RAG",            "first")
-            if "invoice_number" in cf.columns: agg_dict["Invoices"]  = ("invoice_number", "count")
-            if "Aging"          in cf.columns: agg_dict["Max_Aging"] = ("Aging",          "max")
-            if "CSM Email"      in cf.columns: agg_dict["CSM_Email"] = ("CSM Email",      "first")
-            if "Customer CC Email" in cf.columns: agg_dict["Customer_CC"] = ("Customer CC Email", "first")
-
-            cust_summary = cf.groupby("customer_name").agg(**agg_dict).reset_index()
-            if "Max_Aging" in cust_summary.columns:
-                cust_summary = cust_summary.sort_values("Max_Aging", ascending=False)
-
-            # Build per-customer currency-wise outstanding string
-            # e.g. "₹4,838,819  |  $529,867"
-            def fmt_cust_outstanding(cname):
-                rows = cf[cf["customer_name"] == cname]
-                if "balance" not in rows.columns or "currency_code" not in rows.columns:
-                    return "—"
-                parts = (rows.groupby("currency_code")["balance"].sum()
-                             .reset_index()
-                             .sort_values("balance", ascending=False))
-                return "  |  ".join(
-                    f"{CURR_SYM.get(str(r['currency_code']).upper(), '')}{r['balance']:,.0f}"
-                    for _, r in parts.iterrows()
-                )
-
-            cust_summary["Outstanding (FC)"] = cust_summary["customer_name"].apply(fmt_cust_outstanding)
-
-            # Reorder columns
-            col_order = ["customer_name","Email","CSM","RAG","Invoices",
-                         "Outstanding (FC)","Max_Aging"]
-            if "CSM_Email" in cust_summary.columns:
-                col_order.append("CSM_Email")
-            if "Customer_CC" in cust_summary.columns:
-                col_order.append("Customer_CC")
-            cust_summary = cust_summary[[c for c in col_order if c in cust_summary.columns]]
-
-            # ── Upload a customer list to auto-select ─────────────────────────
-            with st.expander("📂 Auto-select from uploaded list", expanded=False):
-                st.caption("Upload a CSV or Excel file with a column named **customer_name** "
-                           "(or any column — first column is used as fallback).")
-                _upload_file = st.file_uploader(
-                    "Upload customer list", type=["csv", "xlsx", "xls"],
-                    key="cust_list_upload", label_visibility="collapsed"
-                )
-                _auto_selected_names: set = set()
-                if _upload_file is not None:
-                    try:
-                        if _upload_file.name.endswith(".csv"):
-                            _ul_df = pd.read_csv(_upload_file)
-                        else:
-                            _ul_df = pd.read_excel(_upload_file)
-                        # Find customer_name column (case-insensitive) or use first column
-                        _cn_col = next(
-                            (c for c in _ul_df.columns
-                             if c.strip().lower() in ("customer_name", "customer name",
-                                                       "customername", "name")),
-                            _ul_df.columns[0]
-                        )
-                        _auto_selected_names = set(
-                            _ul_df[_cn_col].dropna().astype(str).str.strip().tolist()
-                        )
-                        st.success(f"✅ {len(_auto_selected_names)} customer name(s) loaded from **{_upload_file.name}** — "
-                                   f"matching rows will be pre-selected below.")
-                        # Show which names matched / didn't match
-                        _all_cust = set(cust_summary["customer_name"].astype(str).tolist())
-                        _matched   = _auto_selected_names & _all_cust
-                        _unmatched = _auto_selected_names - _all_cust
-                        st.caption(f"Matched: **{len(_matched)}**   |   Not found in current data: **{len(_unmatched)}**"
-                                   + (f" — {sorted(_unmatched)}" if _unmatched else ""))
-                    except Exception as _ul_err:
-                        st.error(f"Could not read file: {_ul_err}")
-
-            # Pre-tick Send? for uploaded names; default False for others
-            cust_summary.insert(
-                0, "Send?",
-                cust_summary["customer_name"].astype(str).isin(_auto_selected_names)
-                if _auto_selected_names else False
+        # ── Template & recipient config (shared across both sub-tabs) ─────────────
+        cfg1, cfg2 = st.columns([2, 3])
+        with cfg1:
+            selected_template = st.selectbox(
+                "📋 Email Template",
+                list(TEMPLATES.keys()),
+                help="Choose the tone and content of your email",
             )
+            template_key = TEMPLATES[selected_template]
 
-            edited_cust = st.data_editor(
-                cust_summary, use_container_width=True, height=360,
-                disabled=[c for c in cust_summary.columns if c != "Send?"],
-                column_config={
-                    "Send?":            st.column_config.CheckboxColumn("Send?", default=False),
-                    "Outstanding (FC)": st.column_config.TextColumn("Outstanding (FC)"),
-                    "Customer_CC":      st.column_config.TextColumn("Customer CC Email"),
-                    "Max_Aging":        st.column_config.NumberColumn("Max Aging (days)", format="%d"),
-                    "Invoices":         st.column_config.NumberColumn("# Invoices", format="%d"),
-                },
-                key="cust_email_selector",
-            )
+        with cfg2:
+            st.markdown("**Recipients**")
+            rc1, rc2, rc3, rc4 = st.columns(4)
+            send_to_customer = rc1.checkbox("✉️ Customer",         value=True, key="rc_customer")
+            send_to_csm      = rc2.checkbox("👤 CSM",              value=True, key="rc_csm")
+            send_to_finance  = rc3.checkbox("🏦 finance@spyne.ai", value=True, key="rc_finance")
+            send_to_other    = rc4.checkbox("📨 Other",            value=False, key="rc_other")
 
-            cust_to_send = edited_cust[edited_cust["Send?"] == True]
-            st.caption(f"**{len(cust_to_send)}** customer(s) selected")
+            other_email = ""
+            if send_to_other:
+                other_email = st.text_input(
+                    "Additional email address",
+                    placeholder="e.g. manager@company.com",
+                    key="rc_other_email",
+                    label_visibility="collapsed",
+                ).strip()
+                if send_to_other and other_email and "@" not in other_email:
+                    st.warning("⚠️ Enter a valid email address for the additional recipient.")
 
-            st.divider()
-            c_note = st.text_area("Additional note (optional)", height=70,
-                                   placeholder="e.g. Please share UTR / transaction details upon payment.",
-                                   key="c_note")
+            if not any([send_to_customer, send_to_csm, send_to_finance,
+                        (send_to_other and other_email and "@" in other_email)]):
+                st.error("Select at least one recipient.")
 
-            if not cust_to_send.empty:
-                with st.expander("👁 Preview email for first selected customer"):
-                    r0        = cust_to_send.iloc[0]
-                    cname0    = r0["customer_name"]
-                    _, phtml  = build_email(template_key, cname0,
-                                            cf[cf["customer_name"]==cname0],
-                                            r0.get("CSM",""), c_note)
-                    st.components.v1.html(phtml, height=600, scrolling=True)
+        st.divider()
+        et1, et2, et3 = st.tabs(["🏢 By Customer", "🧾 By Invoice", "📋 Sent Log"])
 
-            st.divider()
+        def _build_cc(csm_email: str, customer_cc: str = "") -> list:
+            """Build CC list based on recipient toggles + optional customer CC email(s)."""
+            cc = []
+            if send_to_csm and csm_email and "@" in csm_email:
+                cc.append(csm_email)
+            if send_to_finance:
+                cc.append(FINANCE_CC)
+            if send_to_other and other_email and "@" in other_email:
+                cc.append(other_email)
+            # Customer CC Email column — may contain multiple addresses separated by comma/semicolon
+            for addr in re.split(r"[,;]+", str(customer_cc or "")):
+                addr = addr.strip()
+                if addr and "@" in addr and addr not in cc:
+                    cc.append(addr)
+            return cc
 
-            # ── Zoho toggles ───────────────────────────────────────────────────
-            attach_pdfs_cust   = False
-            fetch_plinks_cust  = False
-            if ZOHO_READY:
-                zc1, zc2 = st.columns(2)
-                with zc1:
-                    attach_pdfs_cust = st.checkbox(
-                        "📎 Attach invoice PDFs",
-                        value=False, key="attach_pdfs_cust",
-                        help="Downloads each invoice PDF from Zoho Books and attaches it to the email.",
+        # ═══════════════════════════════════════════════════════════════════════════
+        # SUB-TAB A · CUSTOMER LEVEL (consolidated — one email per customer)
+        # ═══════════════════════════════════════════════════════════════════════════
+        with et1:
+            st.markdown(f"Using template: **{selected_template}** · One consolidated email per customer with all outstanding invoices.")
+
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                c_csm = st.multiselect("CSM",    sorted(fdf["CSM"].dropna().unique())    if "CSM"    in fdf.columns else [], key="c_csm")
+            with c2:
+                c_rag = st.multiselect("RAG",    sorted(fdf["RAG"].dropna().unique())    if "RAG"    in fdf.columns else [], key="c_rag")
+            with c3:
+                c_bkt = st.multiselect("Bucket", [b for b in BUCKET_ORDER if b in fdf.get("Bucket", pd.Series()).values], key="c_bkt")
+            with c4:
+                _cis_opts = (sorted(fdf["Current Invoice Status"].astype(str).str.strip().dropna().unique())
+                             if "Current Invoice Status" in fdf.columns else [])
+                c_inv_status = st.multiselect("Invoice Status", _cis_opts, key="c_inv_status")
+
+            cf = fdf.copy()
+            if c_csm:       cf = cf[cf["CSM"].isin(c_csm)]
+            if c_rag:       cf = cf[cf["RAG"].isin(c_rag)]
+            if c_bkt:       cf = cf[cf["Bucket"].isin(c_bkt)]
+            if c_inv_status and "Current Invoice Status" in cf.columns:
+                cf = cf[cf["Current Invoice Status"].isin(c_inv_status)]
+            if "email" in cf.columns:
+                cf = cf[cf["email"].notna() & (cf["email"].str.strip() != "")]
+
+            if "customer_name" in cf.columns:
+                # Only include columns that actually exist in cf
+                agg_dict = {}
+                if "email"          in cf.columns: agg_dict["Email"]     = ("email",          "first")
+                if "CSM"            in cf.columns: agg_dict["CSM"]       = ("CSM",            "first")
+                if "RAG"            in cf.columns: agg_dict["RAG"]       = ("RAG",            "first")
+                if "invoice_number" in cf.columns: agg_dict["Invoices"]  = ("invoice_number", "count")
+                if "Aging"          in cf.columns: agg_dict["Max_Aging"] = ("Aging",          "max")
+                if "CSM Email"      in cf.columns: agg_dict["CSM_Email"] = ("CSM Email",      "first")
+                if "Customer CC Email" in cf.columns: agg_dict["Customer_CC"] = ("Customer CC Email", "first")
+
+                cust_summary = cf.groupby("customer_name").agg(**agg_dict).reset_index()
+                if "Max_Aging" in cust_summary.columns:
+                    cust_summary = cust_summary.sort_values("Max_Aging", ascending=False)
+
+                # Build per-customer currency-wise outstanding string
+                # e.g. "₹4,838,819  |  $529,867"
+                def fmt_cust_outstanding(cname):
+                    rows = cf[cf["customer_name"] == cname]
+                    if "balance" not in rows.columns or "currency_code" not in rows.columns:
+                        return "—"
+                    parts = (rows.groupby("currency_code")["balance"].sum()
+                                 .reset_index()
+                                 .sort_values("balance", ascending=False))
+                    return "  |  ".join(
+                        f"{CURR_SYM.get(str(r['currency_code']).upper(), '')}{r['balance']:,.0f}"
+                        for _, r in parts.iterrows()
                     )
-                with zc2:
-                    fetch_plinks_cust = st.checkbox(
+
+                cust_summary["Outstanding (FC)"] = cust_summary["customer_name"].apply(fmt_cust_outstanding)
+
+                # Reorder columns
+                col_order = ["customer_name","Email","CSM","RAG","Invoices",
+                             "Outstanding (FC)","Max_Aging"]
+                if "CSM_Email" in cust_summary.columns:
+                    col_order.append("CSM_Email")
+                if "Customer_CC" in cust_summary.columns:
+                    col_order.append("Customer_CC")
+                cust_summary = cust_summary[[c for c in col_order if c in cust_summary.columns]]
+
+                # ── Upload a customer list to auto-select ─────────────────────────
+                with st.expander("📂 Auto-select from uploaded list", expanded=False):
+                    st.caption("Upload a CSV or Excel file with a column named **customer_name** "
+                               "(or any column — first column is used as fallback).")
+                    _upload_file = st.file_uploader(
+                        "Upload customer list", type=["csv", "xlsx", "xls"],
+                        key="cust_list_upload", label_visibility="collapsed"
+                    )
+                    _auto_selected_names: set = set()
+                    if _upload_file is not None:
+                        try:
+                            if _upload_file.name.endswith(".csv"):
+                                _ul_df = pd.read_csv(_upload_file)
+                            else:
+                                _ul_df = pd.read_excel(_upload_file)
+                            # Find customer_name column (case-insensitive) or use first column
+                            _cn_col = next(
+                                (c for c in _ul_df.columns
+                                 if c.strip().lower() in ("customer_name", "customer name",
+                                                           "customername", "name")),
+                                _ul_df.columns[0]
+                            )
+                            _auto_selected_names = set(
+                                _ul_df[_cn_col].dropna().astype(str).str.strip().tolist()
+                            )
+                            st.success(f"✅ {len(_auto_selected_names)} customer name(s) loaded from **{_upload_file.name}** — "
+                                       f"matching rows will be pre-selected below.")
+                            # Show which names matched / didn't match
+                            _all_cust = set(cust_summary["customer_name"].astype(str).tolist())
+                            _matched   = _auto_selected_names & _all_cust
+                            _unmatched = _auto_selected_names - _all_cust
+                            st.caption(f"Matched: **{len(_matched)}**   |   Not found in current data: **{len(_unmatched)}**"
+                                       + (f" — {sorted(_unmatched)}" if _unmatched else ""))
+                        except Exception as _ul_err:
+                            st.error(f"Could not read file: {_ul_err}")
+
+                # Pre-tick Send? for uploaded names; default False for others
+                cust_summary.insert(
+                    0, "Send?",
+                    cust_summary["customer_name"].astype(str).isin(_auto_selected_names)
+                    if _auto_selected_names else False
+                )
+
+                edited_cust = st.data_editor(
+                    cust_summary, use_container_width=True, height=360,
+                    disabled=[c for c in cust_summary.columns if c != "Send?"],
+                    column_config={
+                        "Send?":            st.column_config.CheckboxColumn("Send?", default=False),
+                        "Outstanding (FC)": st.column_config.TextColumn("Outstanding (FC)"),
+                        "Customer_CC":      st.column_config.TextColumn("Customer CC Email"),
+                        "Max_Aging":        st.column_config.NumberColumn("Max Aging (days)", format="%d"),
+                        "Invoices":         st.column_config.NumberColumn("# Invoices", format="%d"),
+                    },
+                    key="cust_email_selector",
+                )
+
+                cust_to_send = edited_cust[edited_cust["Send?"] == True]
+                st.caption(f"**{len(cust_to_send)}** customer(s) selected")
+
+                st.divider()
+                c_note = st.text_area("Additional note (optional)", height=70,
+                                       placeholder="e.g. Please share UTR / transaction details upon payment.",
+                                       key="c_note")
+
+                if not cust_to_send.empty:
+                    with st.expander("👁 Preview email for first selected customer"):
+                        r0        = cust_to_send.iloc[0]
+                        cname0    = r0["customer_name"]
+                        _, phtml  = build_email(template_key, cname0,
+                                                cf[cf["customer_name"]==cname0],
+                                                r0.get("CSM",""), c_note)
+                        st.components.v1.html(phtml, height=600, scrolling=True)
+
+                st.divider()
+
+                # ── Zoho toggles ───────────────────────────────────────────────────
+                attach_pdfs_cust   = False
+                fetch_plinks_cust  = False
+                if ZOHO_READY:
+                    zc1, zc2 = st.columns(2)
+                    with zc1:
+                        attach_pdfs_cust = st.checkbox(
+                            "📎 Attach invoice PDFs",
+                            value=False, key="attach_pdfs_cust",
+                            help="Downloads each invoice PDF from Zoho Books and attaches it to the email.",
+                        )
+                    with zc2:
+                        fetch_plinks_cust = st.checkbox(
+                            "🔗 Add payment links (Pay Now button)",
+                            value=True, key="fetch_plinks_cust",
+                            help="Fetches the Zoho SecurePay link for each invoice and embeds a Pay Now button in the email.",
+                        )
+                else:
+                    st.caption("📎 Zoho Books credentials not configured. Add Zoho keys to your Streamlit secrets to enable PDF attachments and payment links.")
+
+                s1, s2 = st.columns([2, 3])
+                with s1:
+                    send_cust = st.button(
+                        f"📤 Send to {len(cust_to_send)} Customer(s)",
+                        type="primary",
+                        disabled=(len(cust_to_send)==0 or not smtp_ready or
+                                  not any([send_to_customer, send_to_csm, send_to_finance,
+                                           (send_to_other and other_email and "@" in other_email)])),
+                        use_container_width=True, key="send_cust_btn")
+                with s2:
+                    recip_summary = []
+                    if send_to_customer: recip_summary.append("Customer")
+                    if send_to_csm:      recip_summary.append("CSM")
+                    if send_to_finance:  recip_summary.append("finance@spyne.ai")
+                    if send_to_other and other_email and "@" in other_email:
+                        recip_summary.append(other_email)
+                    _has_cust_cc = "Customer CC Email" in cf.columns and cf["Customer CC Email"].astype(str).str.strip().replace({"nan":"","None":""}).ne("").any()
+                    if _has_cust_cc:
+                        recip_summary.append("Customer CC (from sheet)")
+                    st.info("Sending to: " + " · ".join(recip_summary) if recip_summary else "No recipients selected")
+
+                if send_cust and not cust_to_send.empty and smtp_ready:
+                    # ── Get Zoho access token once if either Zoho feature is on ───
+                    zoho_token = None
+                    need_zoho  = (attach_pdfs_cust or fetch_plinks_cust) and ZOHO_READY
+                    if need_zoho:
+                        with st.spinner("🔑 Authenticating with Zoho Books…"):
+                            try:
+                                zoho_token = get_zoho_token(
+                                    ZOHO_CFG["client_id"], ZOHO_CFG["client_secret"],
+                                    ZOHO_CFG["refresh_token"], ZOHO_CFG["dc"],
+                                )
+                            except Exception as zt_err:
+                                st.error(f"Zoho authentication failed: {zt_err}. Emails will be sent without PDFs/payment links.")
+
+                    # ── Batch-fetch payment links only for SELECTED customers ──────
+                    cf_send = cf.copy()
+                    if zoho_token and fetch_plinks_cust and "invoice_number" in cf_send.columns:
+                        selected_customers = cust_to_send["customer_name"].tolist()
+                        all_inv_nos = (
+                            cf_send[cf_send["customer_name"].isin(selected_customers)]
+                            ["invoice_number"].dropna().astype(str).unique().tolist()
+                        )
+                        with st.spinner(f"🔗 Fetching payment links for {len(all_inv_nos)} invoice(s) across {len(selected_customers)} customer(s)…"):
+                            try:
+                                pay_links_map, pay_link_errs = fetch_zoho_payment_links(
+                                    all_inv_nos, zoho_token,
+                                    ZOHO_CFG["org_ids"], ZOHO_CFG["dc"],
+                                )
+                                cf_send["payment_link"] = cf_send["invoice_number"].astype(str).map(pay_links_map)
+                                st.caption(f"🔗 Payment links found: {len(pay_links_map)} / {len(all_inv_nos)}")
+                                if pay_link_errs:
+                                    with st.expander(f"⚠️ {len(pay_link_errs)} invoice(s) had issues fetching payment link"):
+                                        for inv, err in pay_link_errs.items():
+                                            st.text(f"{inv}: {err}")
+                            except Exception as pl_err:
+                                st.warning(f"Payment links fetch failed: {pl_err}")
+
+                    prog = st.progress(0, text="Sending…")
+                    ok, fail, results = 0, 0, []
+                    for idx, (_, crow) in enumerate(cust_to_send.iterrows()):
+                        cname        = crow["customer_name"]
+                        to_email     = str(crow.get("Email","")).strip() if send_to_customer else None
+                        csm_email    = str(crow.get("CSM_Email", crow.get("CSM",""))).strip()
+                        customer_cc  = str(crow.get("Customer_CC", "")).strip()
+                        cc_list      = _build_cc(csm_email, customer_cc)
+                        cust_invs = cf_send[cf_send["customer_name"]==cname]
+                        subject, html = build_email(template_key, cname, cust_invs,
+                                                    crow.get("CSM",""), c_note)
+
+                        # ── Fetch PDFs for all invoices of this customer ───────────
+                        attachments = []
+                        pdf_notes   = []
+                        if zoho_token and attach_pdfs_cust and "invoice_number" in cust_invs.columns:
+                            for inv_no in cust_invs["invoice_number"].dropna().unique():
+                                inv_no = str(inv_no).strip()
+                                try:
+                                    pdf_bytes, _, _org_used, _plink = fetch_zoho_invoice_pdf(
+                                        inv_no, zoho_token,
+                                        ZOHO_CFG["org_ids"], ZOHO_CFG["dc"],
+                                    )
+                                    if pdf_bytes:
+                                        attachments.append((f"{inv_no}.pdf", pdf_bytes))
+                                        pdf_notes.append(f"✅ {inv_no}")
+                                    else:
+                                        pdf_notes.append(f"⚠️ {inv_no} (not in Zoho)")
+                                except Exception as pdf_err:
+                                    pdf_notes.append(f"❌ {inv_no} ({pdf_err})")
+
+                        # Determine actual TO
+                        if to_email and "@" in to_email:
+                            actual_to, actual_cc = to_email, cc_list
+                        elif cc_list:
+                            actual_to, actual_cc = cc_list[0], cc_list[1:]
+                        else:
+                            results.append({"Customer": cname, "Status": "⚠️ No recipients",
+                                            "PDFs": ""})
+                            continue
+                        try:
+                            send_reminder(SMTP_CFG, actual_to, actual_cc, subject, html,
+                                          attachments=attachments or None)
+                            inv_nos_sent = list(cust_invs["invoice_number"].dropna().astype(str).unique()) if "invoice_number" in cust_invs.columns else ["(consolidated)"]
+                            log_email(inv_nos_sent, cname, actual_to,
+                                      ", ".join(actual_cc), subject, "sent",
+                                      template=selected_template)
+                            ok += 1
+                            status = f"✅ Sent" + (f" ({len(attachments)} PDF(s))" if attachments else "")
+                            results.append({"Customer": cname, "To": actual_to,
+                                            "CC": ", ".join(actual_cc),
+                                            "Status": status,
+                                            "PDFs": " | ".join(pdf_notes) if pdf_notes else "—"})
+                        except Exception as e:
+                            inv_nos_sent = list(cust_invs["invoice_number"].dropna().astype(str).unique()) if "invoice_number" in cust_invs.columns else ["(consolidated)"]
+                            log_email(inv_nos_sent, cname, actual_to,
+                                      ", ".join(actual_cc), subject, "failed", str(e),
+                                      template=selected_template)
+                            fail += 1
+                            results.append({"Customer": cname, "To": actual_to,
+                                            "Status": f"❌ {e}",
+                                            "PDFs": " | ".join(pdf_notes) if pdf_notes else "—"})
+                        prog.progress((idx+1)/len(cust_to_send), text=f"Sent {idx+1} of {len(cust_to_send)}…")
+                    prog.empty()
+                    if ok:   st.success(f"✅ {ok} reminder(s) sent.")
+                    if fail: st.error(f"❌ {fail} failed.")
+                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+            else:
+                st.info("customer_name column not detected.")
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # SUB-TAB B · INVOICE LEVEL (one email per invoice)
+        # ═══════════════════════════════════════════════════════════════════════════
+        with et2:
+            st.markdown(f"Using template: **{selected_template}** · One email per invoice.")
+
+            i1, i2, i3 = st.columns(3)
+            with i1:
+                e_csm = st.multiselect("CSM",    sorted(fdf["CSM"].dropna().unique())    if "CSM"    in fdf.columns else [], key="e_csm")
+            with i2:
+                e_rag = st.multiselect("RAG",    sorted(fdf["RAG"].dropna().unique())    if "RAG"    in fdf.columns else [], key="e_rag")
+            with i3:
+                e_bkt = st.multiselect("Bucket", [b for b in BUCKET_ORDER if b in fdf.get("Bucket", pd.Series()).values], key="e_bkt")
+
+            ef = fdf.copy()
+            if e_csm: ef = ef[ef["CSM"].isin(e_csm)]
+            if e_rag: ef = ef[ef["RAG"].isin(e_rag)]
+            if e_bkt: ef = ef[ef["Bucket"].isin(e_bkt)]
+            if "email" in ef.columns:
+                ef = ef[ef["email"].notna() & (ef["email"].str.strip() != "")]
+
+            st.caption(f"{len(ef):,} invoices with valid email addresses")
+
+            sel_cols = [c for c in ["invoice_number","customer_name","email","CSM",
+                                     "CSM Email","Final USD","Aging","Bucket","RAG"] if c in ef.columns]
+            sel_df = ef[sel_cols].copy()
+            if "Aging" in sel_df.columns:
+                sel_df = sel_df.sort_values("Aging", ascending=False)
+            sel_df.insert(0, "Send?", False)
+
+            edited_sel = st.data_editor(
+                sel_df, use_container_width=True, height=340,
+                disabled=[c for c in sel_df.columns if c != "Send?"],
+                column_config={
+                    "Send?":     st.column_config.CheckboxColumn("Send?", default=False),
+                    "Final USD": st.column_config.NumberColumn("Final USD", format="$%.0f"),
+                    "Aging":     st.column_config.NumberColumn("Aging (days)", format="%d"),
+                },
+                key="email_selector",
+            )
+
+            to_send = edited_sel[edited_sel["Send?"] == True]
+            st.caption(f"**{len(to_send)}** invoice(s) selected")
+
+            st.divider()
+            custom_note = st.text_area("Additional note (optional)", height=70,
+                                        placeholder="e.g. Please note our bank details have changed.",
+                                        key="inv_note")
+
+            if not to_send.empty:
+                with st.expander("👁 Preview first email"):
+                    r0       = to_send.iloc[0]
+                    cname0   = str(r0.get("customer_name",""))
+                    _, phtml = build_email(template_key, cname0,
+                                           pd.DataFrame([r0.to_dict()]),
+                                           str(r0.get("CSM","")), custom_note)
+                    st.components.v1.html(phtml, height=560, scrolling=True)
+
+            st.divider()
+
+            # ── Zoho toggles ───────────────────────────────────────────────────────
+            attach_pdfs_inv  = False
+            fetch_plinks_inv = False
+            if ZOHO_READY:
+                zi1, zi2 = st.columns(2)
+                with zi1:
+                    attach_pdfs_inv = st.checkbox(
+                        "📎 Attach invoice PDF",
+                        value=False, key="attach_pdfs_inv",
+                        help="Downloads the invoice PDF from Zoho Books and attaches it.",
+                    )
+                with zi2:
+                    fetch_plinks_inv = st.checkbox(
                         "🔗 Add payment links (Pay Now button)",
-                        value=True, key="fetch_plinks_cust",
-                        help="Fetches the Zoho SecurePay link for each invoice and embeds a Pay Now button in the email.",
+                        value=True, key="fetch_plinks_inv",
+                        help="Fetches the Zoho SecurePay link and embeds a Pay Now button in the email.",
                     )
             else:
                 st.caption("📎 Zoho Books credentials not configured. Add Zoho keys to your Streamlit secrets to enable PDF attachments and payment links.")
 
-            s1, s2 = st.columns([2, 3])
-            with s1:
-                send_cust = st.button(
-                    f"📤 Send to {len(cust_to_send)} Customer(s)",
+            b1, b2 = st.columns([2, 3])
+            with b1:
+                _unique_custs = to_send["customer_name"].nunique() if "customer_name" in to_send.columns else len(to_send)
+                send_clicked = st.button(
+                    f"📤 Send {_unique_custs} Reminder(s)  ({len(to_send)} invoice(s))",
                     type="primary",
-                    disabled=(len(cust_to_send)==0 or not smtp_ready or
+                    disabled=(len(to_send)==0 or not smtp_ready or
                               not any([send_to_customer, send_to_csm, send_to_finance,
                                        (send_to_other and other_email and "@" in other_email)])),
-                    use_container_width=True, key="send_cust_btn")
-            with s2:
-                recip_summary = []
-                if send_to_customer: recip_summary.append("Customer")
-                if send_to_csm:      recip_summary.append("CSM")
-                if send_to_finance:  recip_summary.append("finance@spyne.ai")
+                    use_container_width=True, key="send_inv_btn")
+            with b2:
+                recip_inv = []
+                if send_to_customer: recip_inv.append("Customer")
+                if send_to_csm:      recip_inv.append("CSM")
+                if send_to_finance:  recip_inv.append("finance@spyne.ai")
                 if send_to_other and other_email and "@" in other_email:
-                    recip_summary.append(other_email)
-                _has_cust_cc = "Customer CC Email" in cf.columns and cf["Customer CC Email"].astype(str).str.strip().replace({"nan":"","None":""}).ne("").any()
-                if _has_cust_cc:
-                    recip_summary.append("Customer CC (from sheet)")
-                st.info("Sending to: " + " · ".join(recip_summary) if recip_summary else "No recipients selected")
+                    recip_inv.append(other_email)
+                _has_cust_cc_inv = "Customer CC Email" in ef.columns and ef["Customer CC Email"].astype(str).str.strip().replace({"nan":"","None":""}).ne("").any()
+                if _has_cust_cc_inv:
+                    recip_inv.append("Customer CC (from sheet)")
+                st.info("Sending to: " + " · ".join(recip_inv) if recip_inv else "No recipients selected")
 
-            if send_cust and not cust_to_send.empty and smtp_ready:
-                # ── Get Zoho access token once if either Zoho feature is on ───
-                zoho_token = None
-                need_zoho  = (attach_pdfs_cust or fetch_plinks_cust) and ZOHO_READY
-                if need_zoho:
+            if send_clicked and not to_send.empty and smtp_ready:
+                # ── Get Zoho access token once if either Zoho feature is on ──────
+                zoho_token_inv = None
+                need_zoho_inv  = (attach_pdfs_inv or fetch_plinks_inv) and ZOHO_READY
+                if need_zoho_inv:
                     with st.spinner("🔑 Authenticating with Zoho Books…"):
                         try:
-                            zoho_token = get_zoho_token(
+                            zoho_token_inv = get_zoho_token(
                                 ZOHO_CFG["client_id"], ZOHO_CFG["client_secret"],
                                 ZOHO_CFG["refresh_token"], ZOHO_CFG["dc"],
                             )
                         except Exception as zt_err:
                             st.error(f"Zoho authentication failed: {zt_err}. Emails will be sent without PDFs/payment links.")
 
-                # ── Batch-fetch payment links only for SELECTED customers ──────
-                cf_send = cf.copy()
-                if zoho_token and fetch_plinks_cust and "invoice_number" in cf_send.columns:
-                    selected_customers = cust_to_send["customer_name"].tolist()
-                    all_inv_nos = (
-                        cf_send[cf_send["customer_name"].isin(selected_customers)]
-                        ["invoice_number"].dropna().astype(str).unique().tolist()
-                    )
-                    with st.spinner(f"🔗 Fetching payment links for {len(all_inv_nos)} invoice(s) across {len(selected_customers)} customer(s)…"):
+                # ── Batch-fetch ALL payment links upfront (one pass) ──────────────
+                ef_send = ef.copy()
+                if zoho_token_inv and fetch_plinks_inv and "invoice_number" in ef_send.columns:
+                    sel_inv_nos = to_send["invoice_number"].dropna().astype(str).unique().tolist()
+                    with st.spinner(f"🔗 Fetching payment links for {len(sel_inv_nos)} invoice(s)…"):
                         try:
-                            pay_links_map, pay_link_errs = fetch_zoho_payment_links(
-                                all_inv_nos, zoho_token,
+                            pay_links_map_inv, pay_link_errs_inv = fetch_zoho_payment_links(
+                                sel_inv_nos, zoho_token_inv,
                                 ZOHO_CFG["org_ids"], ZOHO_CFG["dc"],
                             )
-                            cf_send["payment_link"] = cf_send["invoice_number"].astype(str).map(pay_links_map)
-                            st.caption(f"🔗 Payment links found: {len(pay_links_map)} / {len(all_inv_nos)}")
-                            if pay_link_errs:
-                                with st.expander(f"⚠️ {len(pay_link_errs)} invoice(s) had issues fetching payment link"):
-                                    for inv, err in pay_link_errs.items():
+                            ef_send["payment_link"] = ef_send["invoice_number"].astype(str).map(pay_links_map_inv)
+                            st.caption(f"🔗 Payment links found: {len(pay_links_map_inv)} / {len(sel_inv_nos)}")
+                            if pay_link_errs_inv:
+                                with st.expander(f"⚠️ {len(pay_link_errs_inv)} invoice(s) had issues fetching payment link"):
+                                    for inv, err in pay_link_errs_inv.items():
                                         st.text(f"{inv}: {err}")
                         except Exception as pl_err:
                             st.warning(f"Payment links fetch failed: {pl_err}")
 
-                prog = st.progress(0, text="Sending…")
-                ok, fail, results = 0, 0, []
-                for idx, (_, crow) in enumerate(cust_to_send.iterrows()):
-                    cname        = crow["customer_name"]
-                    to_email     = str(crow.get("Email","")).strip() if send_to_customer else None
-                    csm_email    = str(crow.get("CSM_Email", crow.get("CSM",""))).strip()
-                    customer_cc  = str(crow.get("Customer_CC", "")).strip()
-                    cc_list      = _build_cc(csm_email, customer_cc)
-                    cust_invs = cf_send[cf_send["customer_name"]==cname]
-                    subject, html = build_email(template_key, cname, cust_invs,
-                                                crow.get("CSM",""), c_note)
+                # ── Group selected invoices by customer → 1 email per customer ──────
+                _cust_groups = {}
+                for _, row in to_send.iterrows():
+                    cname = str(row.get("customer_name","")).strip() or "(unknown)"
+                    _cust_groups.setdefault(cname, []).append(row)
 
-                    # ── Fetch PDFs for all invoices of this customer ───────────
-                    attachments = []
-                    pdf_notes   = []
-                    if zoho_token and attach_pdfs_cust and "invoice_number" in cust_invs.columns:
-                        for inv_no in cust_invs["invoice_number"].dropna().unique():
-                            inv_no = str(inv_no).strip()
+                progress = st.progress(0, text="Sending…")
+                ok2, fail2, results2 = 0, 0, []
+
+                for idx, (customer, rows) in enumerate(_cust_groups.items()):
+                    inv_nos = [str(r.get("invoice_number","")).strip() for r in rows]
+                    first   = rows[0]   # use first row for contact details
+
+                    # Build enriched invoice DataFrame for this customer
+                    cust_inv_df = pd.concat(
+                        [ef_send[ef_send["invoice_number"].astype(str) == n]
+                         for n in inv_nos], ignore_index=True
+                    )
+                    if cust_inv_df.empty:
+                        cust_inv_df = pd.DataFrame([r.to_dict() for r in rows])
+
+                    to_email    = str(first.get("email","")).strip() if send_to_customer else None
+                    csm_email   = str(first.get("CSM Email","")).strip()
+                    customer_cc = str(first.get("Customer CC Email","")).strip()
+                    cc_list     = _build_cc(csm_email, customer_cc)
+                    subject, html = build_email(template_key, customer,
+                                                cust_inv_df,
+                                                str(first.get("CSM","")), custom_note)
+
+                    # ── Fetch PDFs for all invoices of this customer ───────────────
+                    attachments_inv = []
+                    pdf_notes_inv   = []
+                    if zoho_token_inv and attach_pdfs_inv:
+                        for inv_no in inv_nos:
+                            if not inv_no: continue
                             try:
                                 pdf_bytes, _, _org_used, _plink = fetch_zoho_invoice_pdf(
-                                    inv_no, zoho_token,
+                                    inv_no, zoho_token_inv,
                                     ZOHO_CFG["org_ids"], ZOHO_CFG["dc"],
                                 )
                                 if pdf_bytes:
-                                    attachments.append((f"{inv_no}.pdf", pdf_bytes))
-                                    pdf_notes.append(f"✅ {inv_no}")
+                                    attachments_inv.append((f"{inv_no}.pdf", pdf_bytes))
+                                    pdf_notes_inv.append(f"✅ {inv_no}")
                                 else:
-                                    pdf_notes.append(f"⚠️ {inv_no} (not in Zoho)")
+                                    pdf_notes_inv.append(f"⚠️ {inv_no} not found")
                             except Exception as pdf_err:
-                                pdf_notes.append(f"❌ {inv_no} ({pdf_err})")
+                                pdf_notes_inv.append(f"❌ {inv_no}: {pdf_err}")
+                    pdf_note_str = " | ".join(pdf_notes_inv) if pdf_notes_inv else "—"
 
-                    # Determine actual TO
                     if to_email and "@" in to_email:
                         actual_to, actual_cc = to_email, cc_list
                     elif cc_list:
                         actual_to, actual_cc = cc_list[0], cc_list[1:]
                     else:
-                        results.append({"Customer": cname, "Status": "⚠️ No recipients",
-                                        "PDFs": ""})
+                        results2.append({"Customer": customer,
+                                         "Invoices": ", ".join(inv_nos),
+                                         "Status": "⚠️ No recipients", "PDFs": pdf_note_str})
                         continue
+
                     try:
                         send_reminder(SMTP_CFG, actual_to, actual_cc, subject, html,
-                                      attachments=attachments or None)
-                        inv_nos_sent = list(cust_invs["invoice_number"].dropna().astype(str).unique()) if "invoice_number" in cust_invs.columns else ["(consolidated)"]
-                        log_email(inv_nos_sent, cname, actual_to,
-                                  ", ".join(actual_cc), subject, "sent",
-                                  template=selected_template)
-                        ok += 1
-                        status = f"✅ Sent" + (f" ({len(attachments)} PDF(s))" if attachments else "")
-                        results.append({"Customer": cname, "To": actual_to,
-                                        "CC": ", ".join(actual_cc),
-                                        "Status": status,
-                                        "PDFs": " | ".join(pdf_notes) if pdf_notes else "—"})
+                                      attachments=attachments_inv or None)
+                        log_email(inv_nos, customer, actual_to, ", ".join(actual_cc),
+                                  subject, "sent", template=selected_template)
+                        ok2 += 1
+                        status2 = "✅ Sent" + (f" ({len(attachments_inv)} PDF(s))" if attachments_inv else "")
+                        results2.append({"Customer": customer,
+                                         "Invoices": ", ".join(inv_nos),
+                                         "To": actual_to, "Status": status2, "PDFs": pdf_note_str})
                     except Exception as e:
-                        inv_nos_sent = list(cust_invs["invoice_number"].dropna().astype(str).unique()) if "invoice_number" in cust_invs.columns else ["(consolidated)"]
-                        log_email(inv_nos_sent, cname, actual_to,
-                                  ", ".join(actual_cc), subject, "failed", str(e),
-                                  template=selected_template)
-                        fail += 1
-                        results.append({"Customer": cname, "To": actual_to,
-                                        "Status": f"❌ {e}",
-                                        "PDFs": " | ".join(pdf_notes) if pdf_notes else "—"})
-                    prog.progress((idx+1)/len(cust_to_send), text=f"Sent {idx+1} of {len(cust_to_send)}…")
-                prog.empty()
-                if ok:   st.success(f"✅ {ok} reminder(s) sent.")
-                if fail: st.error(f"❌ {fail} failed.")
-                st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
-        else:
-            st.info("customer_name column not detected.")
+                        log_email(inv_nos, customer, actual_to, ", ".join(actual_cc),
+                                  subject, "failed", str(e), template=selected_template)
+                        fail2 += 1
+                        results2.append({"Customer": customer,
+                                         "Invoices": ", ".join(inv_nos),
+                                         "To": actual_to, "Status": f"❌ {e}", "PDFs": pdf_note_str})
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SUB-TAB B · INVOICE LEVEL (one email per invoice)
-    # ═══════════════════════════════════════════════════════════════════════════
-    with et2:
-        st.markdown(f"Using template: **{selected_template}** · One email per invoice.")
+                    progress.progress((idx+1)/len(_cust_groups),
+                                      text=f"Sent {idx+1} of {len(_cust_groups)} customer(s)…")
+                progress.empty()
+                if ok2:   st.success(f"✅ {ok2} email(s) sent to {ok2} customer(s).")
+                if fail2: st.error(f"❌ {fail2} failed.")
+                st.dataframe(pd.DataFrame(results2), use_container_width=True, hide_index=True)
 
-        i1, i2, i3 = st.columns(3)
-        with i1:
-            e_csm = st.multiselect("CSM",    sorted(fdf["CSM"].dropna().unique())    if "CSM"    in fdf.columns else [], key="e_csm")
-        with i2:
-            e_rag = st.multiselect("RAG",    sorted(fdf["RAG"].dropna().unique())    if "RAG"    in fdf.columns else [], key="e_rag")
-        with i3:
-            e_bkt = st.multiselect("Bucket", [b for b in BUCKET_ORDER if b in fdf.get("Bucket", pd.Series()).values], key="e_bkt")
+        # ═══════════════════════════════════════════════════════════════════════════
+        # SUB-TAB C · SENT LOG
+        # ═══════════════════════════════════════════════════════════════════════════
+        with et3:
+            st.subheader("📋 Sent Email Log")
+            log_df = get_sent_log()
+            if not log_df.empty:
+                # ── Format sent_at as readable IST string ──────────────────────────
+                from datetime import timezone, timedelta
+                _IST = timezone(timedelta(hours=5, minutes=30))
 
-        ef = fdf.copy()
-        if e_csm: ef = ef[ef["CSM"].isin(e_csm)]
-        if e_rag: ef = ef[ef["RAG"].isin(e_rag)]
-        if e_bkt: ef = ef[ef["Bucket"].isin(e_bkt)]
-        if "email" in ef.columns:
-            ef = ef[ef["email"].notna() & (ef["email"].str.strip() != "")]
-
-        st.caption(f"{len(ef):,} invoices with valid email addresses")
-
-        sel_cols = [c for c in ["invoice_number","customer_name","email","CSM",
-                                 "CSM Email","Final USD","Aging","Bucket","RAG"] if c in ef.columns]
-        sel_df = ef[sel_cols].copy()
-        if "Aging" in sel_df.columns:
-            sel_df = sel_df.sort_values("Aging", ascending=False)
-        sel_df.insert(0, "Send?", False)
-
-        edited_sel = st.data_editor(
-            sel_df, use_container_width=True, height=340,
-            disabled=[c for c in sel_df.columns if c != "Send?"],
-            column_config={
-                "Send?":     st.column_config.CheckboxColumn("Send?", default=False),
-                "Final USD": st.column_config.NumberColumn("Final USD", format="$%.0f"),
-                "Aging":     st.column_config.NumberColumn("Aging (days)", format="%d"),
-            },
-            key="email_selector",
-        )
-
-        to_send = edited_sel[edited_sel["Send?"] == True]
-        st.caption(f"**{len(to_send)}** invoice(s) selected")
-
-        st.divider()
-        custom_note = st.text_area("Additional note (optional)", height=70,
-                                    placeholder="e.g. Please note our bank details have changed.",
-                                    key="inv_note")
-
-        if not to_send.empty:
-            with st.expander("👁 Preview first email"):
-                r0       = to_send.iloc[0]
-                cname0   = str(r0.get("customer_name",""))
-                _, phtml = build_email(template_key, cname0,
-                                       pd.DataFrame([r0.to_dict()]),
-                                       str(r0.get("CSM","")), custom_note)
-                st.components.v1.html(phtml, height=560, scrolling=True)
-
-        st.divider()
-
-        # ── Zoho toggles ───────────────────────────────────────────────────────
-        attach_pdfs_inv  = False
-        fetch_plinks_inv = False
-        if ZOHO_READY:
-            zi1, zi2 = st.columns(2)
-            with zi1:
-                attach_pdfs_inv = st.checkbox(
-                    "📎 Attach invoice PDF",
-                    value=False, key="attach_pdfs_inv",
-                    help="Downloads the invoice PDF from Zoho Books and attaches it.",
-                )
-            with zi2:
-                fetch_plinks_inv = st.checkbox(
-                    "🔗 Add payment links (Pay Now button)",
-                    value=True, key="fetch_plinks_inv",
-                    help="Fetches the Zoho SecurePay link and embeds a Pay Now button in the email.",
-                )
-        else:
-            st.caption("📎 Zoho Books credentials not configured. Add Zoho keys to your Streamlit secrets to enable PDF attachments and payment links.")
-
-        b1, b2 = st.columns([2, 3])
-        with b1:
-            _unique_custs = to_send["customer_name"].nunique() if "customer_name" in to_send.columns else len(to_send)
-            send_clicked = st.button(
-                f"📤 Send {_unique_custs} Reminder(s)  ({len(to_send)} invoice(s))",
-                type="primary",
-                disabled=(len(to_send)==0 or not smtp_ready or
-                          not any([send_to_customer, send_to_csm, send_to_finance,
-                                   (send_to_other and other_email and "@" in other_email)])),
-                use_container_width=True, key="send_inv_btn")
-        with b2:
-            recip_inv = []
-            if send_to_customer: recip_inv.append("Customer")
-            if send_to_csm:      recip_inv.append("CSM")
-            if send_to_finance:  recip_inv.append("finance@spyne.ai")
-            if send_to_other and other_email and "@" in other_email:
-                recip_inv.append(other_email)
-            _has_cust_cc_inv = "Customer CC Email" in ef.columns and ef["Customer CC Email"].astype(str).str.strip().replace({"nan":"","None":""}).ne("").any()
-            if _has_cust_cc_inv:
-                recip_inv.append("Customer CC (from sheet)")
-            st.info("Sending to: " + " · ".join(recip_inv) if recip_inv else "No recipients selected")
-
-        if send_clicked and not to_send.empty and smtp_ready:
-            # ── Get Zoho access token once if either Zoho feature is on ──────
-            zoho_token_inv = None
-            need_zoho_inv  = (attach_pdfs_inv or fetch_plinks_inv) and ZOHO_READY
-            if need_zoho_inv:
-                with st.spinner("🔑 Authenticating with Zoho Books…"):
+                def _fmt_ist(ts_str):
                     try:
-                        zoho_token_inv = get_zoho_token(
-                            ZOHO_CFG["client_id"], ZOHO_CFG["client_secret"],
-                            ZOHO_CFG["refresh_token"], ZOHO_CFG["dc"],
-                        )
-                    except Exception as zt_err:
-                        st.error(f"Zoho authentication failed: {zt_err}. Emails will be sent without PDFs/payment links.")
+                        dt = datetime.fromisoformat(str(ts_str).strip())
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=_IST)
+                        else:
+                            dt = dt.astimezone(_IST)
+                        return dt.strftime("%d %b %Y, %I:%M %p IST")
+                    except Exception:
+                        return str(ts_str)[:19]
 
-            # ── Batch-fetch ALL payment links upfront (one pass) ──────────────
-            ef_send = ef.copy()
-            if zoho_token_inv and fetch_plinks_inv and "invoice_number" in ef_send.columns:
-                sel_inv_nos = to_send["invoice_number"].dropna().astype(str).unique().tolist()
-                with st.spinner(f"🔗 Fetching payment links for {len(sel_inv_nos)} invoice(s)…"):
-                    try:
-                        pay_links_map_inv, pay_link_errs_inv = fetch_zoho_payment_links(
-                            sel_inv_nos, zoho_token_inv,
-                            ZOHO_CFG["org_ids"], ZOHO_CFG["dc"],
-                        )
-                        ef_send["payment_link"] = ef_send["invoice_number"].astype(str).map(pay_links_map_inv)
-                        st.caption(f"🔗 Payment links found: {len(pay_links_map_inv)} / {len(sel_inv_nos)}")
-                        if pay_link_errs_inv:
-                            with st.expander(f"⚠️ {len(pay_link_errs_inv)} invoice(s) had issues fetching payment link"):
-                                for inv, err in pay_link_errs_inv.items():
-                                    st.text(f"{inv}: {err}")
-                    except Exception as pl_err:
-                        st.warning(f"Payment links fetch failed: {pl_err}")
+                log_df["sent_at_fmt"] = log_df["sent_at"].apply(_fmt_ist)
 
-            # ── Group selected invoices by customer → 1 email per customer ──────
-            _cust_groups = {}
-            for _, row in to_send.iterrows():
-                cname = str(row.get("customer_name","")).strip() or "(unknown)"
-                _cust_groups.setdefault(cname, []).append(row)
+                # ── Build display dataframe ────────────────────────────────────────
+                cols_available = [c for c in ["sent_at_fmt","invoice_no","customer","to_email",
+                                               "cc_emails","subject","template","status","error"]
+                                  if c in log_df.columns or c == "sent_at_fmt"]
+                # template column may not exist in old rows — fill blank
+                if "template" not in log_df.columns:
+                    log_df["template"] = ""
 
-            progress = st.progress(0, text="Sending…")
-            ok2, fail2, results2 = 0, 0, []
+                display_log = log_df[["sent_at_fmt","invoice_no","customer","to_email",
+                                       "cc_emails","subject","template","status","error"]].copy()
+                display_log.columns = ["Sent At (IST)","Invoice","Customer","To","CC",
+                                        "Subject","Template","Status","Error"]
 
-            for idx, (customer, rows) in enumerate(_cust_groups.items()):
-                inv_nos = [str(r.get("invoice_number","")).strip() for r in rows]
-                first   = rows[0]   # use first row for contact details
+                # ── Summary KPIs ──────────────────────────────────────────────────
+                total_sent = (display_log["Status"] == "sent").sum()
+                total_failed = (display_log["Status"] == "failed").sum()
+                unique_customers = display_log["Customer"].nunique()
+                unique_invoices = display_log["Invoice"].nunique()
 
-                # Build enriched invoice DataFrame for this customer
-                cust_inv_df = pd.concat(
-                    [ef_send[ef_send["invoice_number"].astype(str) == n]
-                     for n in inv_nos], ignore_index=True
+                lk1, lk2, lk3, lk4 = st.columns(4)
+                lk1.metric("Total Reminders Sent", total_sent)
+                lk2.metric("Failed", total_failed)
+                lk3.metric("Unique Customers", unique_customers)
+                lk4.metric("Unique Invoices", unique_invoices)
+
+                st.divider()
+
+                # ── Optional search filter ────────────────────────────────────────
+                _log_search = st.text_input("🔍 Search log (customer, invoice, subject…)", key="log_search")
+                if _log_search.strip():
+                    _mask = display_log.apply(
+                        lambda row: row.astype(str).str.contains(_log_search.strip(), case=False).any(),
+                        axis=1
+                    )
+                    display_log = display_log[_mask]
+
+                st.dataframe(display_log, use_container_width=True, height=450, hide_index=True)
+
+                st.download_button(
+                    "⬇ Download Log",
+                    data=export_excel(display_log),
+                    file_name="sent_email_log.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
-                if cust_inv_df.empty:
-                    cust_inv_df = pd.DataFrame([r.to_dict() for r in rows])
-
-                to_email    = str(first.get("email","")).strip() if send_to_customer else None
-                csm_email   = str(first.get("CSM Email","")).strip()
-                customer_cc = str(first.get("Customer CC Email","")).strip()
-                cc_list     = _build_cc(csm_email, customer_cc)
-                subject, html = build_email(template_key, customer,
-                                            cust_inv_df,
-                                            str(first.get("CSM","")), custom_note)
-
-                # ── Fetch PDFs for all invoices of this customer ───────────────
-                attachments_inv = []
-                pdf_notes_inv   = []
-                if zoho_token_inv and attach_pdfs_inv:
-                    for inv_no in inv_nos:
-                        if not inv_no: continue
-                        try:
-                            pdf_bytes, _, _org_used, _plink = fetch_zoho_invoice_pdf(
-                                inv_no, zoho_token_inv,
-                                ZOHO_CFG["org_ids"], ZOHO_CFG["dc"],
-                            )
-                            if pdf_bytes:
-                                attachments_inv.append((f"{inv_no}.pdf", pdf_bytes))
-                                pdf_notes_inv.append(f"✅ {inv_no}")
-                            else:
-                                pdf_notes_inv.append(f"⚠️ {inv_no} not found")
-                        except Exception as pdf_err:
-                            pdf_notes_inv.append(f"❌ {inv_no}: {pdf_err}")
-                pdf_note_str = " | ".join(pdf_notes_inv) if pdf_notes_inv else "—"
-
-                if to_email and "@" in to_email:
-                    actual_to, actual_cc = to_email, cc_list
-                elif cc_list:
-                    actual_to, actual_cc = cc_list[0], cc_list[1:]
-                else:
-                    results2.append({"Customer": customer,
-                                     "Invoices": ", ".join(inv_nos),
-                                     "Status": "⚠️ No recipients", "PDFs": pdf_note_str})
-                    continue
-
-                try:
-                    send_reminder(SMTP_CFG, actual_to, actual_cc, subject, html,
-                                  attachments=attachments_inv or None)
-                    log_email(inv_nos, customer, actual_to, ", ".join(actual_cc),
-                              subject, "sent", template=selected_template)
-                    ok2 += 1
-                    status2 = "✅ Sent" + (f" ({len(attachments_inv)} PDF(s))" if attachments_inv else "")
-                    results2.append({"Customer": customer,
-                                     "Invoices": ", ".join(inv_nos),
-                                     "To": actual_to, "Status": status2, "PDFs": pdf_note_str})
-                except Exception as e:
-                    log_email(inv_nos, customer, actual_to, ", ".join(actual_cc),
-                              subject, "failed", str(e), template=selected_template)
-                    fail2 += 1
-                    results2.append({"Customer": customer,
-                                     "Invoices": ", ".join(inv_nos),
-                                     "To": actual_to, "Status": f"❌ {e}", "PDFs": pdf_note_str})
-
-                progress.progress((idx+1)/len(_cust_groups),
-                                  text=f"Sent {idx+1} of {len(_cust_groups)} customer(s)…")
-            progress.empty()
-            if ok2:   st.success(f"✅ {ok2} email(s) sent to {ok2} customer(s).")
-            if fail2: st.error(f"❌ {fail2} failed.")
-            st.dataframe(pd.DataFrame(results2), use_container_width=True, hide_index=True)
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SUB-TAB C · SENT LOG
-    # ═══════════════════════════════════════════════════════════════════════════
-    with et3:
-        st.subheader("📋 Sent Email Log")
-        log_df = get_sent_log()
-        if not log_df.empty:
-            # ── Format sent_at as readable IST string ──────────────────────────
-            from datetime import timezone, timedelta
-            _IST = timezone(timedelta(hours=5, minutes=30))
-
-            def _fmt_ist(ts_str):
-                try:
-                    dt = datetime.fromisoformat(str(ts_str).strip())
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=_IST)
-                    else:
-                        dt = dt.astimezone(_IST)
-                    return dt.strftime("%d %b %Y, %I:%M %p IST")
-                except Exception:
-                    return str(ts_str)[:19]
-
-            log_df["sent_at_fmt"] = log_df["sent_at"].apply(_fmt_ist)
-
-            # ── Build display dataframe ────────────────────────────────────────
-            cols_available = [c for c in ["sent_at_fmt","invoice_no","customer","to_email",
-                                           "cc_emails","subject","template","status","error"]
-                              if c in log_df.columns or c == "sent_at_fmt"]
-            # template column may not exist in old rows — fill blank
-            if "template" not in log_df.columns:
-                log_df["template"] = ""
-
-            display_log = log_df[["sent_at_fmt","invoice_no","customer","to_email",
-                                   "cc_emails","subject","template","status","error"]].copy()
-            display_log.columns = ["Sent At (IST)","Invoice","Customer","To","CC",
-                                    "Subject","Template","Status","Error"]
-
-            # ── Summary KPIs ──────────────────────────────────────────────────
-            total_sent = (display_log["Status"] == "sent").sum()
-            total_failed = (display_log["Status"] == "failed").sum()
-            unique_customers = display_log["Customer"].nunique()
-            unique_invoices = display_log["Invoice"].nunique()
-
-            lk1, lk2, lk3, lk4 = st.columns(4)
-            lk1.metric("Total Reminders Sent", total_sent)
-            lk2.metric("Failed", total_failed)
-            lk3.metric("Unique Customers", unique_customers)
-            lk4.metric("Unique Invoices", unique_invoices)
-
-            st.divider()
-
-            # ── Optional search filter ────────────────────────────────────────
-            _log_search = st.text_input("🔍 Search log (customer, invoice, subject…)", key="log_search")
-            if _log_search.strip():
-                _mask = display_log.apply(
-                    lambda row: row.astype(str).str.contains(_log_search.strip(), case=False).any(),
-                    axis=1
-                )
-                display_log = display_log[_mask]
-
-            st.dataframe(display_log, use_container_width=True, height=450, hide_index=True)
-
-            st.download_button(
-                "⬇ Download Log",
-                data=export_excel(display_log),
-                file_name="sent_email_log.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        else:
-            st.info("No emails sent yet.")
+            else:
+                st.info("No emails sent yet.")
