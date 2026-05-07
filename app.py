@@ -130,6 +130,97 @@ BUCKET_ORDER = ["0-15", "16-30", "31-45", "46-60", "61-90", "90+"]
 DB_PATH      = os.path.join(os.path.dirname(__file__), "reasons.db")
 CREDS_PATH   = os.path.join(os.path.dirname(__file__), "credentials.json")
 
+# ── Role definitions ──────────────────────────────────────────────────────────
+ROLES = ["admin", "executor", "viewer", "management"]
+
+ROLE_LABELS = {
+    "admin":      "🔑 Admin",
+    "executor":   "⚡ Executor",
+    "viewer":     "👁 Viewer",
+    "management": "📊 Management",
+}
+
+ROLE_COLORS = {
+    "admin":      "#7c3aed",
+    "executor":   "#2563eb",
+    "viewer":     "#0891b2",
+    "management": "#059669",
+}
+
+# What each role can do
+ROLE_PERMISSIONS = {
+    "admin": {
+        "send_reminders":    True,   # Send email reminders
+        "edit_reasons":      True,   # Add/edit reasons & actions
+        "zoho_pull":         True,   # Pull data from Zoho Books
+        "invoice_drilldown": True,   # View invoice-level detail
+        "download":          True,   # Download Excel exports
+        "refresh_data":      True,   # Refresh Google Sheet / Zoho
+    },
+    "executor": {
+        "send_reminders":    True,
+        "edit_reasons":      True,
+        "zoho_pull":         True,
+        "invoice_drilldown": True,
+        "download":          True,
+        "refresh_data":      True,
+    },
+    "viewer": {
+        "send_reminders":    False,  # Read-only — cannot send emails
+        "edit_reasons":      False,  # Cannot add/edit reasons
+        "zoho_pull":         False,
+        "invoice_drilldown": True,
+        "download":          True,
+        "refresh_data":      True,
+    },
+    "management": {
+        "send_reminders":    False,  # High-level overview only
+        "edit_reasons":      False,
+        "zoho_pull":         False,
+        "invoice_drilldown": False,  # No invoice-level detail
+        "download":          True,
+        "refresh_data":      True,
+    },
+}
+
+# Default role assignments (override via secrets.toml [roles] or credentials.json)
+_DEFAULT_ROLES = {
+    "admin":   "admin",
+    "yash":    "admin",
+    "sukriti": "executor",
+    "finance": "executor",
+    "vijay":   "viewer",
+}
+
+def _load_roles() -> dict:
+    """Return {username: role} from st.secrets or credentials.json."""
+    roles = {}
+    try:
+        if "roles" in st.secrets:
+            roles = {k.lower(): v.lower() for k, v in st.secrets["roles"].items()}
+    except Exception:
+        pass
+    if not roles and os.path.exists(CREDS_PATH):
+        try:
+            with open(CREDS_PATH, "r") as f:
+                data = json.load(f)
+            roles = {k.lower(): v.lower() for k, v in data.get("roles", {}).items()}
+        except Exception:
+            pass
+    if not roles:
+        roles = _DEFAULT_ROLES.copy()
+    return roles
+
+def _get_role(username: str) -> str:
+    """Return the role for a given username. Defaults to 'viewer'."""
+    roles = _load_roles()
+    return roles.get(username.lower(), "viewer")
+
+def _can(permission: str) -> bool:
+    """Check if the current user's role has a given permission."""
+    role = st.session_state.get("_role", "viewer")
+    return ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS["viewer"]).get(permission, False)
+
 # ── Login helpers ─────────────────────────────────────────────────────────────
 import json
 import hashlib
@@ -192,6 +283,7 @@ def _login_page():
             if username and password and users.get(username) == _hash_pw(password):
                 st.session_state["_authenticated"] = True
                 st.session_state["_username"]      = username
+                st.session_state["_role"]          = _get_role(username)
                 st.rerun()
             else:
                 st.error("❌ Invalid username or password.")
@@ -1327,17 +1419,22 @@ def reason_form(level: str, identifiers, label: str, df_ref: pd.DataFrame = None
                 default_date = date.today()
             next_dt = st.date_input("Next Action Date", value=default_date)
 
+        _can_edit_reasons = _can("edit_reasons")
         col_save, col_del = st.columns([3, 1])
         with col_save:
-            if st.form_submit_button("💾  Save", use_container_width=True, type="primary"):
+            if st.form_submit_button("💾  Save", use_container_width=True, type="primary",
+                                     disabled=not _can_edit_reasons):
                 upsert_reason(level, selected, cat, notes, owner, next_dt)
                 st.success("Saved!")
                 st.rerun()
         with col_del:
-            if existing and st.form_submit_button("🗑 Delete", use_container_width=True):
+            if existing and st.form_submit_button("🗑 Delete", use_container_width=True,
+                                                  disabled=not _can_edit_reasons):
                 delete_reason(level, selected)
                 st.warning("Deleted.")
                 st.rerun()
+        if not _can_edit_reasons:
+            st.caption("🔒 Your role is view-only. Contact an Admin to make changes.")
 
     st.divider()
 
@@ -1466,7 +1563,16 @@ load_credentials()   # populate session_state from credentials.json (first run o
 
 # ── Logout in sidebar ─────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown(f"👤 **{st.session_state.get('_username', 'user').title()}**")
+    _sb_role  = st.session_state.get("_role", "viewer")
+    _sb_label = ROLE_LABELS.get(_sb_role, _sb_role.title())
+    _sb_color = ROLE_COLORS.get(_sb_role, "#64748b")
+    st.markdown(
+        f"👤 **{st.session_state.get('_username', 'user').title()}**&nbsp;&nbsp;"
+        f'<span style="background:{_sb_color}33;color:{_sb_color};'
+        f'border:1px solid {_sb_color}66;border-radius:12px;'
+        f'padding:1px 8px;font-size:11px;font-weight:700;">{_sb_label}</span>',
+        unsafe_allow_html=True,
+    )
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state["_authenticated"] = False
         st.session_state["_username"]      = ""
@@ -1480,7 +1586,10 @@ file_bytes = None
 
 # ── Top banner: logo | title | refresh ────────────────────────────────────────
 # Use st.columns for layout (avoids flex-clipping in st.markdown)
-_uname_display = st.session_state.get("_username", "user").title()
+_uname_display  = st.session_state.get("_username", "user").title()
+_role_now       = st.session_state.get("_role", "viewer")
+_role_label     = ROLE_LABELS.get(_role_now, _role_now.title())
+_role_color     = ROLE_COLORS.get(_role_now, "#64748b")
 
 # Shared banner background injected via CSS on a known class
 st.markdown("""
@@ -1528,6 +1637,9 @@ with _col_title:
         f'&nbsp;&nbsp;<span style="background:rgba(96,165,250,0.12);color:#93c5fd;'
         f'border:1px solid rgba(96,165,250,0.25);border-radius:20px;'
         f'padding:2px 10px;font-size:11px;font-weight:600;">👤 {_uname_display}</span>'
+        f'&nbsp;<span style="background:{_role_color}22;color:{_role_color};'
+        f'border:1px solid {_role_color}55;border-radius:20px;'
+        f'padding:2px 10px;font-size:11px;font-weight:700;">{_role_label}</span>'
         f'</div></div>',
         unsafe_allow_html=True,
     )
@@ -1596,7 +1708,9 @@ with _src_tab_zoho:
         with _zb_c3:
             st.markdown("<div style='padding-top:22px'></div>", unsafe_allow_html=True)
             _pull_zoho = st.button("🔗 Pull from Zoho Books", type="primary",
-                                   use_container_width=True, key="pull_zoho_btn")
+                                   use_container_width=True, key="pull_zoho_btn",
+                                   disabled=not _can("zoho_pull"),
+                                   help="🔒 Your role does not have permission to pull Zoho data." if not _can("zoho_pull") else None)
 
         if _pull_zoho:
             try:
@@ -2318,6 +2432,10 @@ with tab_customer:
 
 # ─────────────────────────── TAB 4 · INVOICE DRILLDOWN ───────────────────────
 with tab_invoices:
+    if not _can("invoice_drilldown"):
+        st.info("📊 Invoice-level detail is not available for your role. "
+                "Please contact an Admin if you need access.")
+        st.stop()
     f1, f2, f3, f4 = st.columns(4)
     with f1:
         inv_csm = st.multiselect("CSM", sorted(fdf["CSM"].dropna().unique()), key="inv_csm")
@@ -2448,6 +2566,8 @@ with tab_invoices:
 
 # ─────────────────────────── TAB 4 · REASONS & ACTIONS ───────────────────────
 with tab_reasons:
+    if not _can("edit_reasons"):
+        st.info("👁 You have view-only access to Reasons & Actions.")
     rt1, rt2, rt3 = st.tabs(["🧾 Invoice Level", "🏢 Customer Level", "👤 CSM Level"])
 
     with rt1:
@@ -2464,6 +2584,10 @@ with tab_reasons:
 
 # ─────────────────────────── TAB 5 · SEND REMINDERS ─────────────────────────
 with tab_email:
+    if not _can("send_reminders"):
+        st.info("📧 Sending reminders is not available for your role. "
+                "Please contact an Admin or Executor if you need to send emails.")
+        st.stop()
 
     smtp_ready = all([SMTP_CFG.get("user"), SMTP_CFG.get("password")])
     if not smtp_ready:
