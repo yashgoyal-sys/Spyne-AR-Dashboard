@@ -2473,23 +2473,30 @@ for _col, (_icon, _label, _val, _accent) in zip(_kpi_cols, _kpi_data):
 if _ist_time_str:
     st.caption(f"🕐 Data as of **{_ist_time_str}** · Click **Refresh Data** to fetch latest from Google Sheets")
 
-# ── TABS ──────────────────────────────────────────────────────────────────────
-tab_overview, tab_csm, tab_customer, tab_invoices, tab_reasons, tab_email = st.tabs([
-    "📈 Overview",
-    "👤 CSM Summary",
-    "🏢 Customer Summary",
-    "🔍 Invoice Drilldown",
-    "📝 Reasons & Actions",
-    "📧 Send Reminders",
-])
+# ── TABS — built dynamically; tabs the user can't access are never shown ──────
+_TAB_DEFS = [
+    # (var_name,        label,                   permission or None=always show)
+    ("tab_overview",  "📈 Overview",          "view_overview"),
+    ("tab_csm",       "👤 CSM Summary",        None),
+    ("tab_customer",  "🏢 Customer Summary",   None),
+    ("tab_invoices",  "🔍 Invoice Drilldown",  "invoice_drilldown"),
+    ("tab_reasons",   "📝 Reasons & Actions",  "view_reasons"),
+    ("tab_email",     "📧 Send Reminders",     "send_reminders"),
+]
+_visible_defs = [(var, lbl) for var, lbl, perm in _TAB_DEFS if perm is None or _can(perm)]
+_tab_widgets  = st.tabs([lbl for _, lbl in _visible_defs])
+_tab_map      = {var: widget for (var, _), widget in zip(_visible_defs, _tab_widgets)}
+
+tab_overview = _tab_map.get("tab_overview")   # None when user lacks view_overview
+tab_csm      = _tab_map.get("tab_csm")        # always present
+tab_customer = _tab_map.get("tab_customer")   # always present
+tab_invoices = _tab_map.get("tab_invoices")   # None for management
+tab_reasons  = _tab_map.get("tab_reasons")    # None for management
+tab_email    = _tab_map.get("tab_email")      # None for viewer / csm / management
 
 # ─────────────────────────── TAB 1 · OVERVIEW ────────────────────────────────
-with tab_overview:
-    if not _can("view_overview"):
-        st.info("📈 The Overview dashboard is not available for your role. "
-                "You have access to CSM Summary, Customer Summary, Invoice Drilldown, "
-                "and Reasons & Actions.")
-    else:
+if tab_overview is not None:
+    with tab_overview:
         total_inr   = fdf["Outstanding"].sum() if "Outstanding" in fdf.columns else 0
         n_invoices  = len(fdf)
         n_customers = fdf["customer_name"].nunique() if "customer_name" in fdf.columns else 0
@@ -2977,11 +2984,8 @@ with tab_customer:
 
 
 # ─────────────────────────── TAB 4 · INVOICE DRILLDOWN ───────────────────────
-with tab_invoices:
-    if not _can("invoice_drilldown"):
-        st.info("📊 Invoice-level detail is not available for your role. "
-                "Please contact an Admin if you need access.")
-    else:
+if tab_invoices is not None:
+    with tab_invoices:
         f1, f2, f3, f4 = st.columns(4)
         with f1:
             inv_csm = st.multiselect("CSM", sorted(fdf["CSM"].dropna().unique()), key="inv_csm")
@@ -3111,11 +3115,8 @@ with tab_invoices:
         )
 
 # ─────────────────────────── TAB 4 · REASONS & ACTIONS ───────────────────────
-with tab_reasons:
-    if not _can("view_reasons"):
-        st.info("📝 Reasons & Actions is not available for your role. "
-                "Please contact an Admin if you need access.")
-    else:
+if tab_reasons is not None:
+    with tab_reasons:
         if not _can("edit_reasons"):
             st.info("👁 You have view-only access. Saving and deleting reasons requires Admin or Executor access.")
         rt1, rt2, rt3 = st.tabs(["🧾 Invoice Level", "🏢 Customer Level", "👤 CSM Level"])
@@ -3133,11 +3134,8 @@ with tab_reasons:
             reason_form("csm", df["CSM"].dropna().unique(), "CSM")
 
 # ─────────────────────────── TAB 5 · SEND REMINDERS ─────────────────────────
-with tab_email:
-    if not _can("send_reminders"):
-        st.info("📧 Sending reminders is not available for your role. "
-                "Please contact an Admin or Executor if you need to send emails.")
-    else:
+if tab_email is not None:
+    with tab_email:
 
         smtp_ready = all([SMTP_CFG.get("user"), SMTP_CFG.get("password")])
         if not smtp_ready:
