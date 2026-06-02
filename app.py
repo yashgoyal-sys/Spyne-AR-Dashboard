@@ -818,13 +818,19 @@ def send_reminder(smtp_cfg: dict, to: str, cc_list: list[str],
                     s.starttls(context=ctx)
                     s.ehlo()
                     s.login(smtp_cfg["user"], smtp_cfg["password"])
-                    s.sendmail(smtp_cfg["sender"], recipients, msg.as_string())
+                    failed = s.sendmail(smtp_cfg["sender"], recipients, msg.as_string())
             else:
                 with smtplib.SMTP_SSL(smtp_cfg["host"], smtp_cfg["port"],
                                       context=ctx, timeout=60) as s:
                     s.login(smtp_cfg["user"], smtp_cfg["password"])
-                    s.sendmail(smtp_cfg["sender"], recipients, msg.as_string())
-            return "sent"                # success — exit immediately
+                    failed = s.sendmail(smtp_cfg["sender"], recipients, msg.as_string())
+            # sendmail() returns a dict of {addr: (code, msg)} for rejected recipients
+            if failed:
+                rejected = ", ".join(failed.keys())
+                raise smtplib.SMTPRecipientsRefused(
+                    f"Rejected by server: {rejected} — {failed}"
+                )
+            return "sent"                # all recipients accepted
         except (smtplib.SMTPServerDisconnected,
                 smtplib.SMTPConnectError,
                 TimeoutError,
@@ -3217,6 +3223,34 @@ if tab_email is not None:
         smtp_ready = all([SMTP_CFG.get("user"), SMTP_CFG.get("password")])
         if not smtp_ready:
             st.warning("⚙️ Gmail credentials not configured. Add `smtp_user` and `smtp_pass` to your Streamlit secrets.")
+
+        # ── SMTP diagnostics ──────────────────────────────────────────────────────
+        with st.expander("🔧 SMTP Diagnostics — Test Email", expanded=False):
+            st.caption(f"**Configured sender:** `{SMTP_CFG.get('user','(not set)')}` "
+                       f"· **Host:** `{SMTP_CFG.get('host','smtp.gmail.com')}:{SMTP_CFG.get('port',587)}`")
+            _test_to  = st.text_input("Send test email to", value=SMTP_CFG.get("user",""),
+                                       key="test_smtp_to",
+                                       placeholder="recipient@example.com")
+            if st.button("📨 Send Test Email", key="send_test_smtp", disabled=not smtp_ready):
+                try:
+                    import smtplib as _smtplib, ssl as _ssl
+                    _ctx = _ssl.create_default_context()
+                    with _smtplib.SMTP(SMTP_CFG["host"], SMTP_CFG["port"], timeout=30) as _s:
+                        _s.ehlo(); _s.starttls(context=_ctx); _s.ehlo()
+                        _s.login(SMTP_CFG["user"], SMTP_CFG["password"])
+                        from email.mime.text import MIMEText as _MIMEText
+                        _m = _MIMEText("<p>This is a test email from the <b>AR Collections Dashboard</b>. "
+                                       "If you received this, SMTP is working correctly.</p>", "html")
+                        _m["Subject"] = "✅ AR Dashboard — SMTP Test"
+                        _m["From"]    = SMTP_CFG["sender"]
+                        _m["To"]      = _test_to
+                        _failed = _s.sendmail(SMTP_CFG["user"], [_test_to], _m.as_string())
+                    if _failed:
+                        st.error(f"❌ Server rejected: {_failed}")
+                    else:
+                        st.success(f"✅ Test email sent to **{_test_to}**. Check inbox (and spam folder).")
+                except Exception as _te:
+                    st.error(f"❌ SMTP Error: `{_te}`")
 
         # ── Column availability hint ───────────────────────────────────────────────
         _cc_detected = "Customer CC Email" in fdf.columns
