@@ -45,58 +45,72 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* Metric cards — visible on dark background */
+    /* ── Layout ──────────────────────────────────────────────────────────────── */
+    .block-container { padding-top: 1.5rem; }
+
+    /* ── Metric cards — theme-adaptive ───────────────────────────────────────── */
     div[data-testid="stMetric"] {
-        background: #1e2530;
-        border: 1px solid #2e3a4e;
+        background: var(--secondary-background-color);
+        border: 1px solid rgba(128,128,128,0.18);
         border-radius: 10px;
         padding: 14px 18px;
     }
     div[data-testid="stMetric"] label {
-        color: #94a3b8 !important;
-        font-size: 13px !important;
+        color: var(--text-color) !important;
+        font-size: 12px !important;
         font-weight: 600 !important;
         text-transform: uppercase;
         letter-spacing: 0.05em;
+        opacity: 0.65;
     }
     div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-        color: #f1f5f9 !important;
+        color: var(--text-color) !important;
         font-size: 26px !important;
         font-weight: 700 !important;
     }
 
-    /* Tab labels */
+    /* ── Tab labels — theme-adaptive ─────────────────────────────────────────── */
     div[data-testid="stTabs"] button {
         font-size: 14px;
         font-weight: 600;
-        color: #94a3b8;
     }
     div[data-testid="stTabs"] button[aria-selected="true"] {
-        color: #60a5fa !important;
-        border-bottom: 2px solid #60a5fa !important;
+        color: #3b82f6 !important;
+        border-bottom: 2px solid #3b82f6 !important;
     }
 
-    /* General text contrast */
-    .block-container { padding-top: 1.5rem; }
+    /* ── RAG inline badges ────────────────────────────────────────────────────── */
+    .rag-red   { color: #ef4444; font-weight: 700; }
+    .rag-amber { color: #f59e0b; font-weight: 700; }
+    .rag-green { color: #10b981; font-weight: 700; }
 
-    /* RAG inline badges */
-    .rag-red   { color: #f87171; font-weight: 700; }
-    .rag-amber { color: #fbbf24; font-weight: 700; }
-    .rag-green { color: #34d399; font-weight: 700; }
-
-    /* Dividers */
-    hr { border-color: #2e3a4e !important; }
-
-    /* Sidebar */
-    section[data-testid="stSidebar"] {
-        background: #111827;
-        border-right: 1px solid #1f2937;
+    /* ── Sidebar — theme-adaptive ────────────────────────────────────────────── */
+    /* Expander header labels: clearly visible in both light & dark */
+    section[data-testid="stSidebar"] details summary p,
+    section[data-testid="stSidebar"] details summary span,
+    section[data-testid="stSidebar"] [data-testid="stExpanderDetails"] summary p {
+        color: var(--text-color) !important;
+        font-weight: 600 !important;
+        font-size: 13px !important;
+        opacity: 1 !important;
     }
+    /* Expander toggle icon */
+    section[data-testid="stSidebar"] details summary svg {
+        fill: var(--text-color) !important;
+    }
+    /* Sidebar general text */
     section[data-testid="stSidebar"] .stMarkdown p {
-        color: #94a3b8;
+        color: var(--text-color);
+        opacity: 0.75;
+    }
+    /* Sidebar expander border */
+    section[data-testid="stSidebar"] details {
+        border: 1px solid rgba(128,128,128,0.2) !important;
+        border-radius: 8px !important;
+        margin-bottom: 6px !important;
     }
 
-    /* Buttons */
+    /* ── Primary buttons ──────────────────────────────────────────────────────── */
     div[data-testid="stButton"] button[kind="primary"] {
         background: #2563eb;
         color: #fff;
