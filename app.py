@@ -2151,100 +2151,84 @@ _FIXED_SHEET_URL = "https://docs.google.com/spreadsheets/d/1pY_hPKVa8A-d6kbCnsuR
 
 file_bytes = None
 
-# ── Top banner: logo | title | refresh ────────────────────────────────────────
-# Use st.columns for layout (avoids flex-clipping in st.markdown)
-_uname_display  = st.session_state.get("_username", "user").title()
-_role_now       = st.session_state.get("_role", "viewer")
-_role_label     = ROLE_LABELS.get(_role_now, _role_now.title())
-_role_color     = ROLE_COLORS.get(_role_now, "#64748b")
-
 # ── Global theme-adaptive CSS ─────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Banner: always dark navy regardless of app theme ──────────────────────── */
-[data-testid="stHorizontalBlock"]:has(> div > [data-testid="stColumn"] > div > .banner-logo) {
-    background: linear-gradient(135deg,#0f172a 0%,#0d2b52 55%,#1e3a8a 100%) !important;
-    border-radius: 14px;
-    border: 1px solid rgba(96,165,250,0.15);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.35);
-    padding: 4px 0;
-    margin-bottom: 6px;
-}
-/* Ensure text inside the banner stays white in both light & dark themes */
-[data-testid="stHorizontalBlock"]:has(> div > [data-testid="stColumn"] > div > .banner-logo)
-    [data-testid="stMarkdownContainer"] p,
-[data-testid="stHorizontalBlock"]:has(> div > [data-testid="stColumn"] > div > .banner-logo)
-    [data-testid="stMarkdownContainer"] div {
-    color: inherit !important;
-}
-
-/* ── KPI cards: theme-adaptive via Streamlit CSS vars ──────────────────────── */
+/* ── KPI cards: use Streamlit CSS vars so they adapt to light & dark ───────── */
 .kpi-card {
     background: var(--secondary-background-color);
-    border: 1px solid rgba(128,128,128,0.2);
-    border-radius: 10px;
-    padding: 14px 16px;
+    border: 1px solid rgba(128,128,128,0.18);
+    border-radius: 12px;
+    padding: 16px 18px;
+    height: 100%;
 }
 .kpi-value {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 800;
-    line-height: 1.1;
-    color: var(--text-color);
+    line-height: 1.15;
 }
 .kpi-label {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-top: 5px;
+    letter-spacing: 0.07em;
+    margin-top: 6px;
     color: var(--text-color);
-    opacity: 0.6;
+    opacity: 0.55;
 }
 </style>
 """, unsafe_allow_html=True)
 
-_col_logo, _col_title, _col_refresh = st.columns([2, 6, 2])
+# ── Top banner — pure inline HTML so the dark gradient is guaranteed ───────────
+# (CSS-selector targeting of Streamlit containers is unreliable in light mode)
+_uname_display = st.session_state.get("_username", "user").title()
+_role_now      = st.session_state.get("_role", "viewer")
+_role_label    = ROLE_LABELS.get(_role_now, _role_now.title())
+_role_color    = ROLE_COLORS.get(_role_now, "#64748b")
 
-with _col_logo:
-    # Logo source: local base64 PNG → Clearbit CDN → nothing (CSS class still sets bg)
-    if _LOGO_B64:
-        _logo_src = f"data:image/png;base64,{_LOGO_B64}"
-    else:
-        _logo_src = "https://logo.clearbit.com/spyne.ai"
+if _LOGO_B64:
+    _logo_src = f"data:image/png;base64,{_LOGO_B64}"
+else:
+    _logo_src = "https://logo.clearbit.com/spyne.ai"
 
-    # White pill container so the full-colour logo is visible on dark AND light themes
+_banner_col, _refresh_col = st.columns([5, 1])
+
+with _banner_col:
     st.markdown(
-        f'<div class="banner-logo" style="padding:16px 0 12px 20px;">'
-        f'<div style="background:#ffffff;border-radius:10px;padding:8px 14px;'
-        f'display:inline-block;box-shadow:0 2px 10px rgba(0,0,0,0.25);">'
-        f'<img src="{_logo_src}" '
-        f'style="height:36px;max-width:130px;object-fit:contain;display:block;" '
-        f'onerror="this.parentElement.innerHTML=\'<span style=&quot;font-size:22px;'
-        f'font-weight:900;color:#1e293b;letter-spacing:-1px;&quot;>spyne</span>\'" />'
-        f'</div></div>',
-        unsafe_allow_html=True,
-    )
-
-with _col_title:
-    st.markdown(
-        f'<div style="padding:14px 0 10px 8px;">'
-        f'<div style="color:#f1f5f9;font-size:22px;font-weight:800;'
-        f'letter-spacing:-0.5px;line-height:1.2;text-shadow:0 1px 4px rgba(0,0,0,0.4);">'
+        f'<div style="'
+        f'background:linear-gradient(135deg,#0f172a 0%,#0d2b52 55%,#1e3a8a 100%);'
+        f'border-radius:14px;border:1px solid rgba(96,165,250,0.18);'
+        f'box-shadow:0 4px 20px rgba(0,0,0,0.3);'
+        f'padding:13px 20px;display:flex;align-items:center;gap:18px;">'
+        # Logo pill
+        f'<div style="background:#fff;border-radius:10px;padding:7px 13px;'
+        f'box-shadow:0 2px 8px rgba(0,0,0,0.2);flex-shrink:0;">'
+        f'<img src="{_logo_src}" style="height:34px;max-width:120px;'
+        f'object-fit:contain;display:block;" /></div>'
+        # Title + meta
+        f'<div style="min-width:0;">'
+        f'<div style="color:#f1f5f9;font-size:20px;font-weight:800;'
+        f'letter-spacing:-0.4px;line-height:1.25;">'
         f'AR Collections Dashboard</div>'
-        f'<div style="color:#cbd5e1;font-size:12px;margin-top:4px;">'
-        f'Finance Team &nbsp;·&nbsp; Collections &nbsp;·&nbsp; Aging &nbsp;·&nbsp; Reminders'
-        f'&nbsp;&nbsp;<span style="background:rgba(96,165,250,0.18);color:#bfdbfe;'
-        f'border:1px solid rgba(96,165,250,0.35);border-radius:20px;'
-        f'padding:2px 10px;font-size:11px;font-weight:600;">👤 {_uname_display}</span>'
-        f'&nbsp;<span style="background:{_role_color}33;color:#fff;'
-        f'border:1px solid {_role_color}66;border-radius:20px;'
-        f'padding:2px 10px;font-size:11px;font-weight:700;">{_role_label}</span>'
-        f'</div></div>',
+        f'<div style="color:#94a3b8;font-size:11.5px;margin-top:5px;'
+        f'display:flex;align-items:center;flex-wrap:wrap;gap:6px;">'
+        f'<span>Finance Team &nbsp;·&nbsp; Collections &nbsp;·&nbsp; '
+        f'Aging &nbsp;·&nbsp; Reminders</span>'
+        f'<span style="background:rgba(148,163,184,0.15);color:#cbd5e1;'
+        f'border:1px solid rgba(148,163,184,0.3);border-radius:20px;'
+        f'padding:2px 10px;font-size:10.5px;font-weight:600;white-space:nowrap;">'
+        f'👤 {_uname_display}</span>'
+        f'<span style="background:{_role_color}44;color:#fff;'
+        f'border:1px solid {_role_color}88;border-radius:20px;'
+        f'padding:2px 10px;font-size:10.5px;font-weight:700;white-space:nowrap;">'
+        f'{_role_label}</span>'
+        f'</div></div>'
+        f'</div>',
         unsafe_allow_html=True,
     )
 
-with _col_refresh:
-    st.markdown("<div style='padding-top:14px;'></div>", unsafe_allow_html=True)
+with _refresh_col:
+    st.markdown("<div style='padding-top:6px;'></div>", unsafe_allow_html=True)
     if _can("refresh_data"):
         if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
             fetch_gsheet.clear()
@@ -2253,9 +2237,8 @@ with _col_refresh:
             st.rerun()
     else:
         st.markdown(
-            "<div style='padding:8px 0;text-align:right;'>"
-            "<span style='color:#94a3b8;font-size:12px;font-weight:600;"
-            "text-shadow:0 1px 3px rgba(0,0,0,0.3);'>🔒 Read-only</span>"
+            "<div style='padding-top:10px;text-align:center;'>"
+            "<span style='color:#64748b;font-size:11px;'>🔒 Read-only</span>"
             "</div>",
             unsafe_allow_html=True,
         )
