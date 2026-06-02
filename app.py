@@ -3632,7 +3632,50 @@ if tab_email is not None:
             sel_df = ef[sel_cols].copy()
             if "Aging" in sel_df.columns:
                 sel_df = sel_df.sort_values("Aging", ascending=False)
-            sel_df.insert(0, "Send?", False)
+
+            # ── Upload invoice list to auto-select ────────────────────────────
+            with st.expander("📂 Auto-select from uploaded list", expanded=False):
+                st.caption("Upload a CSV or Excel file with a column named **invoice_number** "
+                           "(or any column — first column is used as fallback).")
+                _inv_upload = st.file_uploader(
+                    "Upload invoice list", type=["csv", "xlsx", "xls"],
+                    key="inv_list_upload", label_visibility="collapsed"
+                )
+                _auto_selected_invs: set = set()
+                if _inv_upload is not None:
+                    try:
+                        if _inv_upload.name.endswith(".csv"):
+                            _inv_ul_df = pd.read_csv(_inv_upload)
+                        else:
+                            _inv_ul_df = pd.read_excel(_inv_upload)
+                        # Use invoice_number column if present, else first column
+                        _inv_col = next(
+                            (c for c in _inv_ul_df.columns
+                             if c.strip().lower() in ("invoice_number", "invoice number",
+                                                      "invoicenumber", "invoice no",
+                                                      "invoice_no", "inv_no")),
+                            _inv_ul_df.columns[0]
+                        )
+                        _auto_selected_invs = set(
+                            _inv_ul_df[_inv_col].dropna().astype(str).str.strip().tolist()
+                        )
+                        st.success(f"✅ {len(_auto_selected_invs)} invoice number(s) loaded from "
+                                   f"**{_inv_upload.name}** — matching rows will be pre-selected below.")
+                        # Show match / no-match summary
+                        _all_invs   = set(sel_df["invoice_number"].astype(str).tolist()) if "invoice_number" in sel_df.columns else set()
+                        _matched    = _auto_selected_invs & _all_invs
+                        _unmatched  = _auto_selected_invs - _all_invs
+                        st.caption(f"Matched: **{len(_matched)}**   |   Not found in current data: **{len(_unmatched)}**"
+                                   + (f" — {sorted(_unmatched)}" if _unmatched else ""))
+                    except Exception as _inv_ul_err:
+                        st.error(f"Could not read file: {_inv_ul_err}")
+
+            # Pre-tick Send? for uploaded invoice numbers; default False for others
+            sel_df.insert(
+                0, "Send?",
+                sel_df["invoice_number"].astype(str).isin(_auto_selected_invs)
+                if _auto_selected_invs and "invoice_number" in sel_df.columns else False
+            )
 
             edited_sel = st.data_editor(
                 sel_df, use_container_width=True, height=340,
