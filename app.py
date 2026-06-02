@@ -446,11 +446,10 @@ def load_credentials():
         except Exception:
             pass
 
-    # ── 3. Push into session_state ────────────────────────────────────────────
+    # ── 3. Push into session_state (secrets always win) ──────────────────────
     for section in ("gmail", "zoho"):
         for key, val in creds[section].items():
-            if key not in st.session_state:
-                st.session_state[key] = val
+            st.session_state[key] = val   # always overwrite so updated secrets take effect
 
     st.session_state["_creds_loaded"] = True
 
