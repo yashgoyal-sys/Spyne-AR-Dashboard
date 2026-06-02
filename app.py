@@ -2900,12 +2900,12 @@ with tab_customer:
     # CSM — take the most frequent CSM per customer
     if "CSM" in fdf.columns:
         cust_df["CSM"] = fdf.groupby("customer_name")["CSM"].agg(
-            lambda x: x.value_counts().index[0] if len(x) else ""
+            lambda x: x.value_counts().index[0] if len(x.value_counts()) else ""
         )
     # Country
     if "country" in fdf.columns:
         cust_df["Country"] = fdf.groupby("customer_name")["country"].agg(
-            lambda x: x.value_counts().index[0] if len(x) else ""
+            lambda x: x.value_counts().index[0] if len(x.value_counts()) else ""
         )
     cust_df = cust_df.reset_index()
 
