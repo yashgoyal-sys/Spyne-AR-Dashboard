@@ -1205,6 +1205,20 @@ def get_sent_log():
         )
 
 
+def recently_sent_invoices(within_hours: int = 24) -> set:
+    """Invoice numbers successfully emailed within the last `within_hours`.
+    sent_at is stored as an IST isoformat string, so lexical >= works."""
+    from datetime import timezone, timedelta
+    _IST = timezone(timedelta(hours=5, minutes=30))
+    cutoff = (datetime.now(_IST) - timedelta(hours=within_hours)).isoformat()
+    with sqlite3.connect(DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT invoice_no FROM sent_emails "
+            "WHERE status='sent' AND sent_at >= ?", (cutoff,)
+        ).fetchall()
+    return {str(r[0]).strip() for r in rows}
+
+
 def get_reminder_counts() -> dict:
     """Return {invoice_no: sent_count} for all successfully sent emails."""
     with sqlite3.connect(DB_PATH) as conn:
@@ -3632,6 +3646,11 @@ if tab_email is not None:
             sel_df = ef[sel_cols].copy()
             if "Aging" in sel_df.columns:
                 sel_df = sel_df.sort_values("Aging", ascending=False)
+            # One row per invoice — the sheet can list an invoice on several rows,
+            # which previously let the same invoice be ticked, emailed and logged
+            # multiple times. Sort-by-Aging first keeps the most-overdue instance.
+            if "invoice_number" in sel_df.columns:
+                sel_df = sel_df.drop_duplicates(subset=["invoice_number"], keep="first")
 
             # ── Upload invoice list to auto-select ────────────────────────────
             with st.expander("📂 Auto-select from uploaded list", expanded=False):
@@ -3727,6 +3746,11 @@ if tab_email is not None:
             else:
                 st.caption("📎 Zoho Books credentials not configured. Add Zoho keys to your Streamlit secrets to enable PDF attachments and payment links.")
 
+            skip_recent = st.checkbox(
+                "🛡️ Don't resend invoices already emailed in the last 24h",
+                value=True, key="skip_recent_inv",
+                help="Prevents accidental duplicate reminders. Uncheck to force a resend.")
+
             b1, b2 = st.columns([2, 3])
             with b1:
                 _unique_custs = to_send["customer_name"].nunique() if "customer_name" in to_send.columns else len(to_send)
@@ -3788,20 +3812,39 @@ if tab_email is not None:
                     cname = str(row.get("customer_name","")).strip() or "(unknown)"
                     _cust_groups.setdefault(cname, []).append(row)
 
+                # Invoices already emailed in the last 24h (idempotency guard)
+                _recent_sent = recently_sent_invoices(24) if skip_recent else set()
+
                 progress = st.progress(0, text="Sending…")
-                ok2, fail2, results2 = 0, 0, []
+                ok2, fail2, skip2, results2 = 0, 0, 0, []
 
                 for idx, (customer, rows) in enumerate(_cust_groups.items()):
-                    inv_nos = [str(r.get("invoice_number","")).strip() for r in rows]
-                    first   = rows[0]   # use first row for contact details
+                    # de-dupe numbers, preserve order
+                    inv_nos = list(dict.fromkeys(
+                        str(r.get("invoice_number","")).strip() for r in rows))
+                    # Drop invoices already emailed recently
+                    _already = [n for n in inv_nos if n in _recent_sent]
+                    inv_nos  = [n for n in inv_nos if n not in _recent_sent]
+                    if _already:
+                        skip2 += len(_already)
+                        results2.append({"Customer": customer,
+                                         "Invoices": ", ".join(_already),
+                                         "Status": "⏭ Skipped — already sent in last 24h"})
+                    if not inv_nos:
+                        progress.progress((idx+1)/len(_cust_groups))
+                        continue
+                    first = rows[0]   # use first row for contact details
 
-                    # Build enriched invoice DataFrame for this customer
-                    cust_inv_df = pd.concat(
-                        [ef_send[ef_send["invoice_number"].astype(str) == n]
-                         for n in inv_nos], ignore_index=True
-                    )
+                    # Match on invoice number AND this customer (so a number reused
+                    # across customers can't leak in), then one row per invoice.
+                    _mask = (ef_send["invoice_number"].astype(str).isin(inv_nos)
+                             & (ef_send["customer_name"].astype(str).str.strip() == customer))
+                    cust_inv_df = (ef_send[_mask]
+                                   .drop_duplicates(subset=["invoice_number"], keep="first")
+                                   .reset_index(drop=True))
                     if cust_inv_df.empty:
-                        cust_inv_df = pd.DataFrame([r.to_dict() for r in rows])
+                        cust_inv_df = (pd.DataFrame([r.to_dict() for r in rows])
+                                       .drop_duplicates(subset=["invoice_number"], keep="first"))
 
                     to_email    = str(first.get("email","")).strip() if send_to_customer else None
                     csm_email   = str(first.get("CSM Email","")).strip()
@@ -3846,6 +3889,7 @@ if tab_email is not None:
                                       attachments=attachments_inv or None)
                         log_email(inv_nos, customer, actual_to, ", ".join(actual_cc),
                                   subject, "sent", template=selected_template)
+                        _recent_sent.update(inv_nos)   # block repeats later in this run
                         ok2 += 1
                         status2 = "✅ Sent" + (f" ({len(attachments_inv)} PDF(s))" if attachments_inv else "")
                         results2.append({"Customer": customer,
@@ -3863,6 +3907,7 @@ if tab_email is not None:
                                       text=f"Sent {idx+1} of {len(_cust_groups)} customer(s)…")
                 progress.empty()
                 if ok2:   st.success(f"✅ {ok2} email(s) sent to {ok2} customer(s).")
+                if skip2: st.info(f"⏭ {skip2} invoice(s) skipped — already sent in last 24h.")
                 if fail2: st.error(f"❌ {fail2} failed.")
                 st.dataframe(pd.DataFrame(results2), use_container_width=True, hide_index=True)
 
