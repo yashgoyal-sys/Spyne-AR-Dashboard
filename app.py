@@ -3641,7 +3641,7 @@ if tab_email is not None:
 
             st.caption(f"{len(ef):,} invoices with valid email addresses")
 
-            sel_cols = [c for c in ["invoice_number","customer_name","email","CSM",
+            sel_cols = [c for c in ["invoice_number","customer_name","email","Customer CC Email","CSM",
                                      "CSM Email","Final USD","Aging","Bucket","RAG"] if c in ef.columns]
             sel_df = ef[sel_cols].copy()
             if "Aging" in sel_df.columns:
