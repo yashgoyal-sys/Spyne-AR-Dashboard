@@ -3315,8 +3315,12 @@ if tab_email is not None:
         def _build_cc(csm_email: str, customer_cc: str = "") -> list:
             """Build CC list based on recipient toggles + optional customer CC email(s)."""
             cc = []
-            if send_to_csm and csm_email and "@" in csm_email:
-                cc.append(csm_email)
+            # CSM Email cell may contain multiple addresses (comma/semicolon separated)
+            if send_to_csm:
+                for addr in re.split(r"[,;]+", str(csm_email or "")):
+                    addr = addr.strip()
+                    if addr and "@" in addr and addr not in cc:
+                        cc.append(addr)
             if send_to_finance:
                 cc.append(FINANCE_CC)
             if send_to_other and other_email and "@" in other_email:
