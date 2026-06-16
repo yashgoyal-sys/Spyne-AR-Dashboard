@@ -249,7 +249,6 @@ ROLE_PERMISSIONS = {
 _DEFAULT_ROLES = {
     "admin":   "admin",
     "yash":    "admin",
-    "sukriti": "executor",
     "finance": "executor",
     "vijay":   "executor",
 }
