@@ -2069,70 +2069,8 @@ with st.sidebar:
 
             st.divider()
 
-            # ── Current users table ──────────────────────────────────────────
-            st.markdown("#### 👤 All Users")
-            _all_db = _db_get_all_users()
-
-            # Merge static + DB for display
-            _static_roles = {}
-            if os.path.exists(CREDS_PATH):
-                try:
-                    with open(CREDS_PATH, "r") as _f:
-                        _static_roles = json.load(_f).get("roles", {})
-                except Exception:
-                    pass
-            try:
-                if "roles" in st.secrets:
-                    _static_roles.update(dict(st.secrets["roles"]))
-            except Exception:
-                pass
-            _db_unames = set(_all_db["username"].tolist()) if not _all_db.empty else set()
-
-            def _role_tag(role: str) -> str:
-                clr = ROLE_COLORS.get(role, "#64748b")
-                lbl = ROLE_LABELS.get(role, role.title())
-                return (f'<span style="background:{clr}22;color:{clr};border:1px solid {clr}55;'
-                        f'border-radius:10px;padding:1px 8px;font-size:11px;font-weight:700;">{lbl}</span>')
-
-            # Static config users (non-editable)
-            _any_static = False
-            for _u, _r in sorted({**_DEFAULT_ROLES, **_static_roles}.items()):
-                if _u in _db_unames:
-                    continue
-                _any_static = True
-                _uc1, _uc2, _uc3 = st.columns([3, 3, 2])
-                with _uc1:
-                    st.markdown(f"🔒 **{_u}**  \n<small style='color:#6b7280;'>static config</small>",
-                                unsafe_allow_html=True)
-                with _uc2:
-                    st.markdown(_role_tag(_r), unsafe_allow_html=True)
-                with _uc3:
-                    st.caption("(config only)")
-
-            # DB users (editable)
-            if not _all_db.empty:
-                for _, _row in _all_db.iterrows():
-                    _uc1, _uc2, _uc3 = st.columns([3, 3, 2])
-                    with _uc1:
-                        _csm_hint = ""
-                        if _row["role"] == "csm" and _row.get("csm_name"):
-                            _csm_hint = f" · CSM: *{_row['csm_name']}*"
-                        st.markdown(
-                            f"✏️ **{_row['username']}**{_csm_hint}  \n"
-                            f"<small style='color:#6b7280;'>by {_row.get('created_by','—')} "
-                            f"· {str(_row.get('created_at',''))[:16]}</small>",
-                            unsafe_allow_html=True)
-                    with _uc2:
-                        st.markdown(_role_tag(_row["role"]), unsafe_allow_html=True)
-                    with _uc3:
-                        if st.button("🗑 Delete", key=f"del_{_row['username']}",
-                                     use_container_width=True):
-                            _ok2, _msg2 = _db_delete_user(_row["username"])
-                            st.toast(_msg2, icon="✅" if _ok2 else "❌")
-                            st.rerun()
-                    st.markdown("---")
-
             # ── Edit DB user ─────────────────────────────────────────────────
+            _all_db = _db_get_all_users()
             if not _all_db.empty:
                 st.markdown("#### ✏️ Edit DB User")
                 with st.form("edit_user_form", clear_on_submit=True):
@@ -2164,17 +2102,6 @@ with st.sidebar:
                     else:
                         st.error(_msg3)
                     st.rerun()
-
-            st.divider()
-
-            # ── Streamlit Cloud secrets snippet ──────────────────────────────
-            st.markdown("#### ☁️ Streamlit Cloud Secrets")
-            st.caption(
-                "Paste this into **App Settings → Secrets** on Streamlit Cloud "
-                "so users persist across redeploys."
-            )
-            _snippet = _get_secrets_toml_snippet()
-            st.code(_snippet, language="toml")
 
     st.divider()
 
