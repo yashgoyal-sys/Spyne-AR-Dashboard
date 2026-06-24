@@ -387,11 +387,71 @@ def _exchange_google_code(code, client_id, client_secret, redirect_uri):
     info = _req.get(_GOOGLE_INFO_URL, headers={"Authorization": f"Bearer {data['access_token']}"}, timeout=10).json()
     return info  # {email, name, picture, ...}
 
+_EMAIL_ROLES_PATH = os.path.join(os.path.dirname(__file__), "email_roles.json")
+_GITHUB_REPO      = "yashgoyal-sys/Spyne-AR-Dashboard"
+_EMAIL_ROLES_FILE = "email_roles.json"
+
+def _load_email_roles_file() -> dict:
+    """Load email→role map from email_roles.json (git-tracked, survives redeploys)."""
+    # Try local file first
+    if os.path.exists(_EMAIL_ROLES_PATH):
+        try:
+            with open(_EMAIL_ROLES_PATH) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    # Fall back to fetching from GitHub raw (works on Streamlit Cloud even if local file is stale)
+    try:
+        import requests as _req
+        r = _req.get(
+            f"https://raw.githubusercontent.com/{_GITHUB_REPO}/master/{_EMAIL_ROLES_FILE}",
+            timeout=5,
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return {}
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_email_roles() -> dict:
+    return _load_email_roles_file()
+
+def _push_email_roles_to_github(roles: dict) -> bool:
+    """Commit updated email_roles.json to GitHub via API. Returns True on success."""
+    import base64 as _b64
+    import requests as _req
+    try:
+        token = st.secrets.get("github_token") or ""
+        if not token and os.path.exists(CREDS_PATH):
+            with open(CREDS_PATH) as f:
+                token = json.load(f).get("github_token", "")
+        if not token:
+            return False
+        headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+        api_url = f"https://api.github.com/repos/{_GITHUB_REPO}/contents/{_EMAIL_ROLES_FILE}"
+        # Get current SHA
+        sha = None
+        r = _req.get(api_url, headers=headers, timeout=10)
+        if r.status_code == 200:
+            sha = r.json().get("sha")
+        content = _b64.b64encode(json.dumps(roles, indent=2, sort_keys=True).encode()).decode()
+        body = {"message": "chore: update email_roles via admin approval", "content": content}
+        if sha:
+            body["sha"] = sha
+        r = _req.put(api_url, headers=headers, json=body, timeout=15)
+        if r.status_code in (200, 201):
+            _cached_email_roles.clear()  # bust cache
+            return True
+    except Exception:
+        pass
+    return False
+
 def _get_email_role(email: str):
     """Return (role, csm_name) for an approved email, or (None, None) if not approved.
-    Priority: SQLite DB (admin UI changes) > st.secrets [email_roles] > credentials.json."""
+    Priority: SQLite DB > email_roles.json (git) > st.secrets > credentials.json."""
     email = email.lower().strip()
-    # 1. SQLite (highest priority — admin approvals via UI)
+    # 1. SQLite — highest priority (admin UI changes take effect immediately)
     try:
         with sqlite3.connect(DB_PATH) as conn:
             row = conn.execute(
@@ -401,21 +461,24 @@ def _get_email_role(email: str):
             return row[0], row[1]
     except Exception:
         pass
-    # 2. st.secrets [email_roles] — persists across Streamlit Cloud redeploys
+    # 2. email_roles.json committed to git — survives redeploys
+    er = _cached_email_roles()
+    if email in er:
+        return er[email], None
+    # 3. st.secrets [email_roles]
     try:
-        er = st.secrets.get("email_roles", {})
-        if email in er:
-            return er[email], None
+        sec_er = st.secrets.get("email_roles", {})
+        if email in sec_er:
+            return sec_er[email], None
     except Exception:
         pass
-    # 3. credentials.json [email_roles]
+    # 4. credentials.json [email_roles]
     try:
         if os.path.exists(CREDS_PATH):
             with open(CREDS_PATH) as f:
                 data = json.load(f)
-            er = data.get("email_roles", {})
-            if email in er:
-                return er[email], None
+            if email in data.get("email_roles", {}):
+                return data["email_roles"][email], None
     except Exception:
         pass
     return None, None
@@ -430,6 +493,15 @@ def _upsert_email_role(email, role, csm_name=None, granted_by="admin"):
                 role=excluded.role, csm_name=excluded.csm_name,
                 granted_by=excluded.granted_by, granted_at=excluded.granted_at
         """, (email, role, csm_name or None, granted_by, datetime.now().isoformat()))
+    # Update local email_roles.json and push to GitHub so approvals survive redeploys
+    try:
+        all_roles = _load_email_roles_file()
+        all_roles[email] = role
+        with open(_EMAIL_ROLES_PATH, "w") as f:
+            json.dump(all_roles, f, indent=2, sort_keys=True)
+        _push_email_roles_to_github(all_roles)
+    except Exception:
+        pass
     _sync_users_to_credentials()
 
 def _create_access_request(email, name):
