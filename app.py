@@ -324,9 +324,22 @@ def _load_roles() -> dict:
     return roles
 
 def _get_role(username: str) -> str:
-    """Return the role for a given username. Defaults to 'viewer'."""
+    """Return the role for a given username. Defaults to 'viewer'.
+    Also checks email_roles table when username looks like an email address."""
+    uname = username.lower().strip()
+    # Check email_roles first if username looks like an email
+    if "@" in uname:
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                row = conn.execute(
+                    "SELECT role FROM email_roles WHERE email=?", (uname,)
+                ).fetchone()
+            if row:
+                return row[0]
+        except Exception:
+            pass
     roles = _load_roles()
-    return roles.get(username.lower(), "viewer")
+    return roles.get(uname, "viewer")
 
 def _can(permission: str) -> bool:
     """Check if the current user's role has a given permission."""
@@ -336,6 +349,103 @@ def _can(permission: str) -> bool:
 # ── Login helpers ─────────────────────────────────────────────────────────────
 import json
 import hashlib
+import urllib.parse as _urlparse
+
+GOOGLE_AUTH_DOMAIN = "spyne.ai"
+_GOOGLE_AUTH_URL   = "https://accounts.google.com/o/oauth2/v2/auth"
+_GOOGLE_TOKEN_URL  = "https://oauth2.googleapis.com/token"
+_GOOGLE_INFO_URL   = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+def _get_google_cfg():
+    """Return (client_id, client_secret, redirect_uri) or (None,None,None) if not configured."""
+    try:
+        sec = st.secrets.get("google_oauth", {})
+        return sec.get("client_id"), sec.get("client_secret"), sec.get("redirect_uri")
+    except Exception:
+        return None, None, None
+
+def _google_auth_url(client_id, redirect_uri):
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    return _GOOGLE_AUTH_URL + "?" + _urlparse.urlencode(params)
+
+def _exchange_google_code(code, client_id, client_secret, redirect_uri):
+    import requests as _req
+    r = _req.post(_GOOGLE_TOKEN_URL, data={
+        "code": code, "client_id": client_id, "client_secret": client_secret,
+        "redirect_uri": redirect_uri, "grant_type": "authorization_code",
+    }, timeout=10)
+    data = r.json()
+    if "access_token" not in data:
+        return None
+    info = _req.get(_GOOGLE_INFO_URL, headers={"Authorization": f"Bearer {data['access_token']}"}, timeout=10).json()
+    return info  # {email, name, picture, ...}
+
+def _get_email_role(email: str):
+    """Return (role, csm_name) for an approved email, or (None, None) if not approved."""
+    email = email.lower().strip()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT role, csm_name FROM email_roles WHERE email=?", (email,)
+            ).fetchone()
+        if row:
+            return row[0], row[1]
+    except Exception:
+        pass
+    return None, None
+
+def _upsert_email_role(email, role, csm_name=None, granted_by="admin"):
+    email = email.lower().strip()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("""
+            INSERT INTO email_roles (email, role, csm_name, granted_by, granted_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(email) DO UPDATE SET
+                role=excluded.role, csm_name=excluded.csm_name,
+                granted_by=excluded.granted_by, granted_at=excluded.granted_at
+        """, (email, role, csm_name or None, granted_by, datetime.now().isoformat()))
+    _sync_users_to_credentials()
+
+def _create_access_request(email, name):
+    email = email.lower().strip()
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("""
+                INSERT INTO access_requests (email, name, requested_at, status)
+                VALUES (?,?,?,?)
+                ON CONFLICT(email) DO UPDATE SET
+                    name=excluded.name, requested_at=excluded.requested_at, status='pending'
+            """, (email, name or email.split("@")[0], datetime.now().isoformat(), "pending"))
+        return True
+    except Exception:
+        return False
+
+def _get_pending_requests():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            return pd.read_sql(
+                "SELECT id, email, name, requested_at FROM access_requests WHERE status='pending' ORDER BY requested_at DESC",
+                conn
+            )
+    except Exception:
+        return pd.DataFrame()
+
+def _approve_request(email, role, csm_name, granted_by):
+    email = email.lower().strip()
+    _upsert_email_role(email, role, csm_name, granted_by)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE access_requests SET status='approved' WHERE email=?", (email,))
+
+def _deny_request(email):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("UPDATE access_requests SET status='denied' WHERE email=?", (email.lower().strip(),))
 
 def _hash_pw(password: str) -> str:
     return hashlib.sha256(password.strip().encode()).hexdigest()
@@ -391,7 +501,83 @@ def _login_page():
     if st.session_state.get("_authenticated"):
         return True
 
-    # Centre the form
+    client_id, client_secret, redirect_uri = _get_google_cfg()
+    google_configured = bool(client_id and client_secret and redirect_uri)
+
+    # ── Handle Google OAuth callback (code in query params) ──────────────────
+    qp = st.query_params
+    if google_configured and "code" in qp:
+        with st.spinner("Completing Google sign-in…"):
+            try:
+                info = _exchange_google_code(qp["code"], client_id, client_secret, redirect_uri)
+            except Exception as _e:
+                st.error(f"Google sign-in failed: {_e}")
+                st.query_params.clear()
+                st.rerun()
+                return False
+
+        # Clear the code from URL
+        st.query_params.clear()
+
+        if not info or "email" not in info:
+            st.error("Could not retrieve email from Google. Please try again.")
+            return False
+
+        email = info["email"].lower().strip()
+        name  = info.get("name", email.split("@")[0])
+
+        # Domain check
+        if not email.endswith(f"@{GOOGLE_AUTH_DOMAIN}"):
+            st.error(f"❌ Only @{GOOGLE_AUTH_DOMAIN} accounts are allowed.")
+            return False
+
+        # Check if approved
+        role, csm_name = _get_email_role(email)
+        if role:
+            # Approved — log in
+            st.session_state["_authenticated"] = True
+            st.session_state["_username"]      = email
+            st.session_state["_role"]          = role
+            st.session_state["_google_email"]  = email
+            if role == "csm" and csm_name:
+                st.session_state["_csm_name"] = csm_name
+            st.rerun()
+            return True
+
+        # Not yet approved — check for existing request
+        try:
+            with sqlite3.connect(DB_PATH) as _conn:
+                _req_row = _conn.execute(
+                    "SELECT status FROM access_requests WHERE email=?", (email,)
+                ).fetchone()
+        except Exception:
+            _req_row = None
+
+        if _req_row and _req_row[0] == "denied":
+            st.error("❌ Your access request was denied. Contact the admin.")
+            return False
+
+        if not _req_row or _req_row[0] != "pending":
+            # Create new request
+            _create_access_request(email, name)
+            # Email admin
+            _notify_admin_of_request(email, name)
+
+        # Show pending screen
+        _, mid, _ = st.columns([1, 1.5, 1])
+        with mid:
+            st.markdown(
+                "<h2 style='text-align:center;'>⏳ Access Requested</h2>"
+                f"<p style='text-align:center;color:#6b7280;'>Signed in as <b>{email}</b></p>"
+                "<p style='text-align:center;'>Your request has been sent to the admin. "
+                "You'll be notified once access is granted. Try signing in again after approval.</p>",
+                unsafe_allow_html=True,
+            )
+            if st.button("🔄 Check again", use_container_width=True):
+                st.rerun()
+        return False
+
+    # ── Normal login UI ────────────────────────────────────────────────────────
     _, mid, _ = st.columns([1, 1.2, 1])
     with mid:
         st.markdown(
@@ -399,6 +585,23 @@ def _login_page():
             "<p style='text-align:center;color:#6b7280;margin-bottom:24px;'>Spyne.ai · Finance Team</p>",
             unsafe_allow_html=True,
         )
+
+        # Google Sign-In button
+        if google_configured:
+            auth_url = _google_auth_url(client_id, redirect_uri)
+            st.markdown(
+                f"""<a href="{auth_url}" style="display:block;text-decoration:none;">
+                <div style="display:flex;align-items:center;justify-content:center;gap:10px;
+                background:#fff;border:1px solid #dadce0;border-radius:8px;padding:10px 20px;
+                cursor:pointer;font-family:Google Sans,sans-serif;font-size:14px;font-weight:500;
+                color:#3c4043;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin-bottom:16px;">
+                <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+                Sign in with Google (@{GOOGLE_AUTH_DOMAIN})
+                </div></a>""",
+                unsafe_allow_html=True,
+            )
+            st.markdown("<div style='text-align:center;color:#9ca3af;font-size:12px;margin:8px 0;'>— or use username &amp; password —</div>", unsafe_allow_html=True)
+
         with st.form("login_form"):
             username = st.text_input("Username").strip().lower()
             password = st.text_input("Password", type="password")
@@ -413,6 +616,7 @@ def _login_page():
                 st.rerun()
             else:
                 st.error("❌ Invalid username or password.")
+
     return False
 
 def load_credentials():
@@ -770,6 +974,41 @@ def build_email(template_key: str, customer: str, invoices_df: pd.DataFrame,
                                customer, body, custom_note, csm)
 
     return subject, html
+
+
+def _notify_admin_of_request(email: str, name: str):
+    """Send an email to the SMTP sender notifying of a new access request."""
+    try:
+        smtp_cfg = {
+            "host":     "smtp.gmail.com",
+            "port":     587,
+            "user":     st.session_state.get("smtp_user", ""),
+            "password": st.session_state.get("smtp_pass", ""),
+            "sender":   st.session_state.get("smtp_sender", ""),
+            "use_tls":  True,
+        }
+        if not smtp_cfg["user"] or not smtp_cfg["password"]:
+            return
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        import smtplib
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"New Access Request — {name} ({email})"
+        msg["From"]    = f"{smtp_cfg['sender']} <{smtp_cfg['user']}>"
+        msg["To"]      = smtp_cfg["user"]
+        body = (
+            f"<p>A new access request was received for the AR Collections Dashboard.</p>"
+            f"<table><tr><td><b>Name:</b></td><td>{name}</td></tr>"
+            f"<tr><td><b>Email:</b></td><td>{email}</td></tr></table>"
+            f"<p>Log in as admin to approve or deny this request from the <b>User Management</b> panel.</p>"
+        )
+        msg.attach(MIMEText(body, "html"))
+        with smtplib.SMTP(smtp_cfg["host"], smtp_cfg["port"], timeout=15) as s:
+            s.starttls()
+            s.login(smtp_cfg["user"], smtp_cfg["password"])
+            s.sendmail(smtp_cfg["user"], [smtp_cfg["user"]], msg.as_string())
+    except Exception:
+        pass  # notification is best-effort
 
 
 def send_reminder(smtp_cfg: dict, to: str, cc_list: list[str],
@@ -1174,6 +1413,26 @@ def init_db():
             conn.execute("ALTER TABLE app_users ADD COLUMN csm_name TEXT")
         except Exception:
             pass
+        # ── Google OAuth email→role table ─────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS email_roles (
+                email       TEXT PRIMARY KEY,
+                role        TEXT NOT NULL DEFAULT 'viewer',
+                csm_name    TEXT,
+                granted_by  TEXT,
+                granted_at  TEXT
+            )
+        """)
+        # ── Pending access requests ───────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS access_requests (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                email        TEXT NOT NULL UNIQUE,
+                name         TEXT,
+                requested_at TEXT,
+                status       TEXT DEFAULT 'pending'
+            )
+        """)
 
 
 def log_email(invoice_nos, customer, to_email, cc_emails, subject, status,
@@ -1437,6 +1696,16 @@ def _get_secrets_toml_snippet() -> str:
                   "[csm_assignments]"]
         for u, cname in sorted(all_csm.items()):
             lines.append(f'{u:<14}= "{cname}"')
+    # Gather email_roles from DB
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            er_rows = conn.execute("SELECT email, role FROM email_roles").fetchall()
+        if er_rows:
+            lines += ["", "[email_roles]"]
+            for em, rl in sorted(er_rows):
+                lines.append(f'"{em}" = "{rl}"')
+    except Exception:
+        pass
     return "\n".join(lines)
 
 
@@ -2033,6 +2302,40 @@ with st.sidebar:
                     f"<div style='font-size:10px;color:#6b7280;margin-top:2px;'>{_role_desc[_rname]}</div>"
                     f"</div>", unsafe_allow_html=True)
             st.markdown("")
+
+            # ── Pending Access Requests ──────────────────────────────────────
+            _pending = _get_pending_requests()
+            if not _pending.empty:
+                st.markdown(f"#### 🔔 Pending Requests ({len(_pending)})")
+                for _, _preq in _pending.iterrows():
+                    st.markdown(f"**{_preq['name']}** · `{_preq['email']}`  \n"
+                                f"<small style='color:#6b7280;'>{str(_preq['requested_at'])[:16]}</small>",
+                                unsafe_allow_html=True)
+                    _pa_c1, _pa_c2, _pa_c3 = st.columns([2, 1, 1])
+                    with _pa_c1:
+                        _pa_role = st.selectbox("Role", ROLES, key=f"pr_role_{_preq['email']}",
+                                                format_func=lambda r: ROLE_LABELS.get(r, r.title()),
+                                                index=ROLES.index("viewer"))
+                    with _pa_c2:
+                        _pa_csm = st.text_input("CSM Name", key=f"pr_csm_{_preq['email']}", placeholder="if CSM role")
+                    with _pa_c3:
+                        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+                        if st.button("✅ Approve", key=f"pr_approve_{_preq['email']}", use_container_width=True, type="primary"):
+                            _approve_request(_preq['email'], _pa_role, _pa_csm or None,
+                                             granted_by=st.session_state.get("_username", "admin"))
+                            st.toast(f"✅ {_preq['email']} approved as {_pa_role}", icon="✅")
+                            st.session_state["_secrets_changed"] = True
+                            st.rerun()
+                        if st.button("❌ Deny", key=f"pr_deny_{_preq['email']}", use_container_width=True):
+                            _deny_request(_preq['email'])
+                            st.toast(f"Denied {_preq['email']}", icon="❌")
+                            st.rerun()
+                    st.markdown("---")
+            else:
+                st.markdown("#### 🔔 Pending Requests")
+                st.caption("No pending access requests.")
+
+            st.divider()
 
             # ── Create new user ──────────────────────────────────────────────
             st.markdown("#### ➕ Create User")
