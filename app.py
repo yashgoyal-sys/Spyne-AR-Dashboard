@@ -388,8 +388,10 @@ def _exchange_google_code(code, client_id, client_secret, redirect_uri):
     return info  # {email, name, picture, ...}
 
 def _get_email_role(email: str):
-    """Return (role, csm_name) for an approved email, or (None, None) if not approved."""
+    """Return (role, csm_name) for an approved email, or (None, None) if not approved.
+    Priority: SQLite DB (admin UI changes) > st.secrets [email_roles] > credentials.json."""
     email = email.lower().strip()
+    # 1. SQLite (highest priority — admin approvals via UI)
     try:
         with sqlite3.connect(DB_PATH) as conn:
             row = conn.execute(
@@ -397,6 +399,23 @@ def _get_email_role(email: str):
             ).fetchone()
         if row:
             return row[0], row[1]
+    except Exception:
+        pass
+    # 2. st.secrets [email_roles] — persists across Streamlit Cloud redeploys
+    try:
+        er = st.secrets.get("email_roles", {})
+        if email in er:
+            return er[email], None
+    except Exception:
+        pass
+    # 3. credentials.json [email_roles]
+    try:
+        if os.path.exists(CREDS_PATH):
+            with open(CREDS_PATH) as f:
+                data = json.load(f)
+            er = data.get("email_roles", {})
+            if email in er:
+                return er[email], None
     except Exception:
         pass
     return None, None
