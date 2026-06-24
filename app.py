@@ -1306,7 +1306,9 @@ def _db_delete_user(username: str) -> tuple[bool, str]:
 
 
 def _sync_users_to_credentials():
-    """Write all DB users back to credentials.json and secrets.toml (local files only)."""
+    """Write all DB users back to credentials.json and secrets.toml (local files only).
+    Also sets _secrets_changed flag so the UI shows a 'copy to Streamlit Cloud' prompt."""
+    st.session_state["_secrets_changed"] = True
     import re as _re
     # Gather DB data
     db_pw_map: dict[str, str] = {}
@@ -2137,6 +2139,16 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ── Streamlit Cloud secrets sync banner (shown after any user/password change) ─
+if st.session_state.get("_secrets_changed") and _can("manage_users"):
+    with st.warning("⚠️ **Password or user change detected.** Streamlit Cloud cannot be updated automatically — paste the snippet below into **App Settings → Secrets** to persist this change across redeploys.", icon=None):
+        pass
+    with st.expander("📋 Copy updated secrets snippet", expanded=False):
+        st.code(_get_secrets_toml_snippet(), language="toml")
+        if st.button("✅ Done — dismiss", key="_dismiss_secrets_banner"):
+            st.session_state["_secrets_changed"] = False
+            st.rerun()
 
 # ── Top banner — pure inline HTML so the dark gradient is guaranteed ───────────
 # (CSS-selector targeting of Streamlit containers is unreliable in light mode)
