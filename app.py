@@ -2632,31 +2632,163 @@ _FIXED_SHEET_URL = "https://docs.google.com/spreadsheets/d/1pY_hPKVa8A-d6kbCnsuR
 
 file_bytes = None
 
-# ── Global theme-adaptive CSS ─────────────────────────────────────────────────
-st.markdown("""
+# ── Design system — theme tokens (matches "AR Dashboard UI design") ───────────
+st.session_state.setdefault("_theme", "dark")
+_AR_THEME = st.session_state["_theme"]
+
+_AR_TOKENS = {
+    "dark": {
+        "bg": "#0b1120", "panel": "#121c30", "panel2": "#0e1626",
+        "border": "rgba(148,163,184,0.13)", "text": "#f1f5f9", "muted": "#94a3b8",
+        "faint": "#64748b", "hover": "rgba(148,163,184,0.07)", "accent": "#38bdf8",
+        "head1": "#0b2a6b", "head2": "#1e40af",
+        "shadow": "0 24px 60px -32px rgba(0,0,0,0.8)",
+    },
+    "light": {
+        "bg": "#f4f6f9", "panel": "#ffffff", "panel2": "#fbfcfe",
+        "border": "#e6e9ef", "text": "#0f172a", "muted": "#5b6677",
+        "faint": "#94a3b8", "hover": "#f3f5f8", "accent": "#2563eb",
+        "head1": "#0b2a6b", "head2": "#2563eb",
+        "shadow": "0 1px 3px rgba(15,23,42,0.07), 0 10px 30px -18px rgba(15,23,42,0.22)",
+    },
+}
+_T = _AR_TOKENS[_AR_THEME]
+
+st.markdown(f"""
 <style>
-/* ── KPI cards: use Streamlit CSS vars so they adapt to light & dark ───────── */
-.kpi-card {
-    background: var(--secondary-background-color);
-    border: 1px solid rgba(128,128,128,0.18);
-    border-radius: 12px;
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {{
+    --ar-bg:{_T['bg']}; --ar-panel:{_T['panel']}; --ar-panel2:{_T['panel2']};
+    --ar-border:{_T['border']}; --ar-text:{_T['text']}; --ar-muted:{_T['muted']};
+    --ar-faint:{_T['faint']}; --ar-hover:{_T['hover']}; --ar-accent:{_T['accent']};
+    --ar-shadow:{_T['shadow']};
+}}
+
+/* ── Base canvas ─────────────────────────────────────────────────────────── */
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
+    background: var(--ar-bg) !important;
+}}
+[data-testid="stHeader"] {{ background: transparent !important; }}
+html, body, .stApp, [data-testid="stMarkdownContainer"] {{
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    color: var(--ar-text);
+}}
+.block-container {{ padding-top: 1.1rem; max-width: 1400px; }}
+
+/* base text colours (inline styles still win for coloured numbers) */
+.stApp p, .stApp li, .stApp label, .stApp .stMarkdown,
+.stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6 {{
+    color: var(--ar-text);
+}}
+.stApp [data-testid="stCaptionContainer"], .stApp small {{ color: var(--ar-faint) !important; }}
+
+/* ── KPI cards ──────────────────────────────────────────────────────────── */
+.kpi-card {{
+    background: var(--ar-panel);
+    border: 1px solid var(--ar-border);
+    border-radius: 14px;
     padding: 16px 18px;
     height: 100%;
-}
-.kpi-value {
-    font-size: 24px;
-    font-weight: 800;
-    line-height: 1.15;
-}
-.kpi-label {
-    font-size: 10px;
+    box-shadow: var(--ar-shadow);
+}}
+.kpi-value {{
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 25px;
+    font-weight: 600;
+    line-height: 1.05;
+}}
+.kpi-label {{
+    font-size: 10.5px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
-    margin-top: 6px;
-    color: var(--text-color);
-    opacity: 0.55;
-}
+    letter-spacing: 0.06em;
+    margin-top: 8px;
+    color: var(--ar-faint);
+}}
+
+/* ── Tabs ───────────────────────────────────────────────────────────────── */
+div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
+    gap: 2px; border-bottom: 1px solid var(--ar-border);
+}}
+div[data-testid="stTabs"] button {{
+    font-family: 'Manrope', sans-serif !important;
+    font-size: 14px !important; font-weight: 600 !important;
+    color: var(--ar-muted) !important; background: transparent !important;
+}}
+div[data-testid="stTabs"] button[aria-selected="true"] {{
+    color: var(--ar-text) !important;
+    border-bottom: 2px solid var(--ar-accent) !important;
+}}
+div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {{ background: var(--ar-accent) !important; }}
+
+/* ── Data tables / dataframes ───────────────────────────────────────────── */
+[data-testid="stDataFrame"], [data-testid="stTable"], [data-testid="stDataEditor"] {{
+    background: var(--ar-panel) !important;
+    border: 1px solid var(--ar-border) !important;
+    border-radius: 14px !important;
+    box-shadow: var(--ar-shadow);
+}}
+.stApp table {{ color: var(--ar-text); }}
+
+/* ── Inputs / selects / textareas ───────────────────────────────────────── */
+.stTextInput input, .stNumberInput input, .stDateInput input,
+.stTextArea textarea, [data-baseweb="select"] > div, [data-baseweb="input"] {{
+    background: var(--ar-panel2) !important;
+    border-color: var(--ar-border) !important;
+    color: var(--ar-text) !important;
+    border-radius: 10px !important;
+}}
+.stMultiSelect [data-baseweb="tag"] {{ background: var(--ar-accent) !important; }}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+div[data-testid="stButton"] button[kind="secondary"] {{
+    background: var(--ar-panel) !important;
+    border: 1px solid var(--ar-border) !important;
+    color: var(--ar-text) !important;
+    border-radius: 10px !important; font-weight: 600 !important;
+}}
+div[data-testid="stButton"] button[kind="primary"] {{
+    background: var(--ar-accent) !important; color: #fff !important;
+    border: none !important; border-radius: 10px !important; font-weight: 700 !important;
+}}
+div[data-testid="stButton"] button[kind="primary"]:hover {{ filter: brightness(0.93); }}
+
+/* ── RAG inline badges ──────────────────────────────────────────────────── */
+.rag-red   {{ color: #e5484d; font-weight: 700; }}
+.rag-amber {{ color: #e08c00; font-weight: 700; }}
+.rag-green {{ color: #1aa873; font-weight: 700; }}
+.ar-chip {{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px;
+    border-radius:999px; font-size:12px; font-weight:600; }}
+
+/* ── Metric widgets ─────────────────────────────────────────────────────── */
+div[data-testid="stMetric"] {{
+    background: var(--ar-panel); border: 1px solid var(--ar-border);
+    border-radius: 14px; padding: 14px 18px; box-shadow: var(--ar-shadow);
+}}
+div[data-testid="stMetric"] label {{
+    color: var(--ar-faint) !important; font-size: 10.5px !important; font-weight: 700 !important;
+    text-transform: uppercase; letter-spacing: 0.06em;
+}}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
+    color: var(--ar-text) !important;
+    font-family: 'Space Grotesk', sans-serif !important;
+    font-size: 24px !important; font-weight: 600 !important;
+}}
+
+/* ── Sidebar ────────────────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] {{ background: var(--ar-panel2) !important; }}
+section[data-testid="stSidebar"] details summary p,
+section[data-testid="stSidebar"] details summary span {{
+    color: var(--ar-text) !important; font-weight: 600 !important; font-size: 13px !important;
+}}
+section[data-testid="stSidebar"] details summary svg {{ fill: var(--ar-text) !important; }}
+section[data-testid="stSidebar"] details {{
+    border: 1px solid var(--ar-border) !important; border-radius: 8px !important; margin-bottom: 6px !important;
+}}
+
+/* source-tabs sit flush under header */
+div[data-testid="stTabs"] {{ margin-top: 4px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -2682,46 +2814,52 @@ if _LOGO_B64:
 else:
     _logo_src = "https://logo.clearbit.com/spyne.ai"
 
-_banner_col, _refresh_col = st.columns([5, 1])
+_banner_col, _theme_col, _refresh_col = st.columns([5, 1, 1])
 
 with _banner_col:
     st.markdown(
         f'<div style="'
-        f'background:linear-gradient(135deg,#0f172a 0%,#0d2b52 55%,#1e3a8a 100%);'
-        f'border-radius:14px;border:1px solid rgba(96,165,250,0.18);'
-        f'box-shadow:0 4px 20px rgba(0,0,0,0.3);'
-        f'padding:13px 20px;display:flex;align-items:center;gap:18px;">'
+        f'background:linear-gradient(120deg,{_T["head1"]} 0%,{_T["head2"]} 100%);'
+        f'border-radius:14px;'
+        f'box-shadow:0 8px 28px -12px rgba(0,0,0,0.45);'
+        f'padding:14px 22px;display:flex;align-items:center;gap:16px;">'
         # Logo pill
-        f'<div style="background:#fff;border-radius:10px;padding:7px 13px;'
-        f'box-shadow:0 2px 8px rgba(0,0,0,0.2);flex-shrink:0;">'
-        f'<img src="{_logo_src}" style="height:34px;max-width:120px;'
+        f'<div style="background:#fff;border-radius:12px;padding:9px 14px;'
+        f'box-shadow:0 4px 14px rgba(0,0,0,0.18);flex-shrink:0;">'
+        f'<img src="{_logo_src}" style="height:24px;max-width:110px;'
         f'object-fit:contain;display:block;" /></div>'
         # Title + meta
         f'<div style="min-width:0;">'
-        f'<div style="color:#f1f5f9;font-size:20px;font-weight:800;'
-        f'letter-spacing:-0.4px;line-height:1.25;">'
+        f'<div style="font-family:\'Space Grotesk\',sans-serif;color:#fff;font-size:19px;'
+        f'font-weight:600;letter-spacing:-0.01em;line-height:1.1;">'
         f'AR Collections Dashboard</div>'
-        f'<div style="color:#94a3b8;font-size:11.5px;margin-top:5px;'
-        f'display:flex;align-items:center;flex-wrap:wrap;gap:6px;">'
-        f'<span>Finance Team &nbsp;·&nbsp; Collections &nbsp;·&nbsp; '
-        f'Aging &nbsp;·&nbsp; Reminders</span>'
-        f'<span style="background:rgba(148,163,184,0.15);color:#cbd5e1;'
-        f'border:1px solid rgba(148,163,184,0.3);border-radius:20px;'
-        f'padding:2px 10px;font-size:10.5px;font-weight:600;white-space:nowrap;">'
-        f'👤 {_uname_display}</span>'
-        f'<span style="background:{_role_color}44;color:#fff;'
-        f'border:1px solid {_role_color}88;border-radius:20px;'
-        f'padding:2px 10px;font-size:10.5px;font-weight:700;white-space:nowrap;">'
+        f'<div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:5px;'
+        f'display:flex;align-items:center;flex-wrap:wrap;gap:10px;">'
+        f'<span>Finance Team &middot; Collections &middot; Aging &middot; Reminders</span>'
+        f'<span style="background:rgba(255,255,255,0.14);color:#fff;'
+        f'border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">'
+        f'{_uname_display}</span>'
+        f'<span style="background:rgba(250,204,21,0.22);color:#fde68a;'
+        f'border-radius:999px;'
+        f'padding:3px 9px;font-size:11px;font-weight:700;white-space:nowrap;">'
         f'{_role_label}</span>'
         f'</div></div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
+with _theme_col:
+    st.markdown("<div style='padding-top:6px;'></div>", unsafe_allow_html=True)
+    _next_theme = "light" if _AR_THEME == "dark" else "dark"
+    _theme_label = "☀️ Light" if _AR_THEME == "dark" else "🌙 Dark"
+    if st.button(_theme_label, use_container_width=True, key="_theme_toggle"):
+        st.session_state["_theme"] = _next_theme
+        st.rerun()
+
 with _refresh_col:
     st.markdown("<div style='padding-top:6px;'></div>", unsafe_allow_html=True)
     if _can("refresh_data"):
-        if st.button("🔄 Refresh Data", use_container_width=True, type="primary"):
+        if st.button("🔄 Refresh", use_container_width=True, type="primary"):
             fetch_gsheet.clear()
             st.session_state.pop("_gs_file_bytes", None)
             st.session_state["_gs_last_refresh"] = None
@@ -2729,7 +2867,7 @@ with _refresh_col:
     else:
         st.markdown(
             "<div style='padding-top:10px;text-align:center;'>"
-            "<span style='color:#64748b;font-size:11px;'>🔒 Read-only</span>"
+            "<span style='color:var(--ar-faint);font-size:11px;'>🔒 Read-only</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -3004,21 +3142,21 @@ _ks_overdue     = (fdf[fdf["RAG"] == "Red"]["Final USD"].sum()
                    if "RAG" in fdf.columns and "Final USD" in fdf.columns else 0)
 _ks_avg_aging   = int(fdf["Aging"].mean()) if "Aging" in fdf.columns and len(fdf) else 0
 
-# ── KPI cards — one st.markdown per column (avoids markdown parser issues) ────
+# ── KPI ribbon — matches design (uppercase label, Space Grotesk coloured value) ─
 _kpi_data = [
-    ("💵", "Total Outstanding (USD)", f"${_ks_total_usd:,.0f}", "#60a5fa"),
-    ("🔴", "At Risk (Red)",           f"${_ks_overdue:,.0f}",   "#f87171"),
-    ("🏢", "Customers",               f"{_ks_customers:,}",     "#34d399"),
-    ("🧾", "Invoices",                f"{_ks_invoices:,}",      "#a78bfa"),
-    ("⏳", "Avg Aging (days)",        f"{_ks_avg_aging}",       "#fbbf24"),
+    ("Total Outstanding (USD)", f"${_ks_total_usd:,.0f}", "", "#3b82f6"),
+    ("At Risk (Red)",           f"${_ks_overdue:,.0f}",   "", "#e5484d"),
+    ("Customers",               f"{_ks_customers:,}",     "", "#1aa873"),
+    ("Invoices",                f"{_ks_invoices:,}",      "", "#8b5cf6"),
+    ("Avg Aging",               f"{_ks_avg_aging}",       " days", "#e08c00"),
 ]
 _kpi_cols = st.columns(5)
-for _col, (_icon, _label, _val, _accent) in zip(_kpi_cols, _kpi_data):
+for _col, (_label, _val, _unit, _accent) in zip(_kpi_cols, _kpi_data):
     _col.markdown(
         f"<div class='kpi-card'>"
-        f"<div style='color:{_accent};font-size:20px;margin-bottom:4px;'>{_icon}</div>"
-        f"<div class='kpi-value' style='color:{_accent};'>{_val}</div>"
-        f"<div class='kpi-label'>{_label}</div>"
+        f"<div class='kpi-label' style='margin-top:0;margin-bottom:9px;'>{_label}</div>"
+        f"<div class='kpi-value' style='color:{_accent};'>{_val}"
+        f"<span style='font-size:13px;color:var(--ar-faint);font-weight:500;'>{_unit}</span></div>"
         f"</div>",
         unsafe_allow_html=True,
     )
