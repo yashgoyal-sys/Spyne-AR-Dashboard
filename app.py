@@ -691,10 +691,13 @@ def _login_page():
     st.markdown("""
     <style>
     [data-testid="stAppViewContainer"] { background: #0b1120 !important; }
-    [data-testid="stHeader"] { background: transparent !important; }
+    [data-testid="stHeader"] { background: transparent !important; display: none !important; }
     [data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: 100% !important; }
-    [data-testid="stBottom"] { display: none; }
-    footer { display: none; }
+    [data-testid="stBottom"] { display: none !important; }
+    [data-testid="stVerticalBlockBorderWrapper"] { padding: 0 !important; }
+    footer { display: none !important; }
+    section[data-testid="stMain"] > div { padding: 0 !important; }
+    iframe { display: block; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -708,7 +711,7 @@ def _login_page():
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  html, body {{ height: 100%; font-family: 'Manrope', -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }}
+  html, body {{ height: 100vh; width: 100vw; font-family: 'Manrope', -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }}
   body {{ background: #0b1120; color: #f1f5f9; overflow: hidden; }}
   @keyframes floaty {{ 0%,100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-9px); }} }}
   @keyframes riseIn {{ from {{ opacity:0; transform:translateY(14px); }} to {{ opacity:1; transform:translateY(0); }} }}
@@ -861,8 +864,24 @@ def _login_page():
     </div>
   </div>
 </div>
+<script>
+  // Resize iframe to fill the Streamlit viewport
+  function resizeParent() {{
+    try {{
+      window.parent.document.querySelectorAll('iframe').forEach(function(f) {{
+        if (f.contentWindow === window) {{
+          f.style.height = window.screen.height + 'px';
+          f.style.width = '100%';
+          f.style.border = 'none';
+          f.style.display = 'block';
+        }}
+      }});
+    }} catch(e) {{}}
+  }}
+  window.addEventListener('load', resizeParent);
+</script>
 </body>
-</html>""", height=700, scrolling=False)
+</html>""", height=800, scrolling=False)
 
     return False
 
