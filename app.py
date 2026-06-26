@@ -677,7 +677,6 @@ def _login_page():
             unsafe_allow_html=True,
         )
 
-        # Google Sign-In button
         if google_configured:
             auth_url = _google_auth_url(client_id, redirect_uri)
             st.markdown(
@@ -691,22 +690,8 @@ def _login_page():
                 </div></a>""",
                 unsafe_allow_html=True,
             )
-            st.markdown("<div style='text-align:center;color:#9ca3af;font-size:12px;margin:8px 0;'>— or use username &amp; password —</div>", unsafe_allow_html=True)
-
-        with st.form("login_form"):
-            username = st.text_input("Username").strip().lower()
-            password = st.text_input("Password", type="password")
-            submitted = st.form_submit_button("Login", use_container_width=True, type="primary")
-
-        if submitted:
-            users = _load_users()
-            if username and password and users.get(username) == _hash_pw(password):
-                st.session_state["_authenticated"] = True
-                st.session_state["_username"]      = username
-                st.session_state["_role"]          = _get_role(username)
-                st.rerun()
-            else:
-                st.error("❌ Invalid username or password.")
+        else:
+            st.error("⚙️ Google login is not configured. Contact the admin.")
 
     return False
 
