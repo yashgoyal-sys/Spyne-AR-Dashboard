@@ -675,222 +675,164 @@ def _login_page():
 
     if google_configured:
         auth_url = _google_auth_url(client_id, redirect_uri)
-        _btn_html = f"""
-        <input type="hidden" id="_au" value="{auth_url}">
-        <button class="google-btn" id="gbtn">
-            <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-              <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"></path>
-              <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"></path>
-              <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"></path>
-              <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"></path>
-            </svg>
-            Sign in with Google
-        </button>
-        <script>
-          document.getElementById('gbtn').addEventListener('click', function() {{
-            var url = document.getElementById('_au').value;
-            window.top.location.href = url;
-          }});
-        </script>"""
     else:
-        _btn_html = '<p style="color:#ef4444;font-size:13px;text-align:center;">Google login not configured. Contact admin.</p>'
+        auth_url = None
 
-    # Hide Streamlit chrome and set background; card rendered via components.html (bypasses markdown sanitizer)
+    # ── Full-page CSS: hide Streamlit chrome, set background, font ─────────────
     st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
     [data-testid="stAppViewContainer"] { background: #0b1120 !important; }
-    [data-testid="stHeader"] { background: transparent !important; display: none !important; }
+    [data-testid="stHeader"] { display: none !important; }
     [data-testid="stMainBlockContainer"] { padding: 0 !important; max-width: 100% !important; }
-    [data-testid="stBottom"] { display: none !important; }
-    [data-testid="stVerticalBlockBorderWrapper"] { padding: 0 !important; }
-    footer { display: none !important; }
-    section[data-testid="stMain"] > div { padding: 0 !important; }
-    iframe { display: block; }
+    [data-testid="stBottom"], footer { display: none !important; }
+    section[data-testid="stMain"] > div:first-child { padding-top: 0 !important; }
+    [data-testid="column"] { padding: 0 !important; }
     </style>
     """, unsafe_allow_html=True)
 
     import streamlit.components.v1 as _components
-    _components.html(f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-<style>
-  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  html, body {{ height: 100vh; width: 100vw; font-family: 'Manrope', -apple-system, sans-serif; -webkit-font-smoothing: antialiased; }}
-  body {{ background: #0b1120; color: #f1f5f9; overflow: hidden; }}
-  @keyframes floaty {{ 0%,100% {{ transform: translateY(0); }} 50% {{ transform: translateY(-9px); }} }}
-  @keyframes riseIn {{ from {{ opacity:0; transform:translateY(14px); }} to {{ opacity:1; transform:translateY(0); }} }}
-  .wrap {{
-    min-height: 100vh; width: 100%; display: flex; position: relative; overflow: hidden;
-  }}
-  /* glow blobs */
-  .blob1 {{ position:absolute; top:-200px; left:-120px; width:620px; height:620px; border-radius:50%;
-    background:radial-gradient(circle, rgba(249,115,22,0.16), transparent 62%); filter:blur(20px); pointer-events:none; }}
-  .blob2 {{ position:absolute; bottom:-260px; right:8%; width:680px; height:680px; border-radius:50%;
-    background:radial-gradient(circle, rgba(34,211,238,0.13), transparent 62%); filter:blur(20px); pointer-events:none; }}
-  .grid {{ position:absolute; inset:0;
-    background-image: linear-gradient(rgba(148,163,184,0.04) 1px, transparent 1px), linear-gradient(90deg,rgba(148,163,184,0.04) 1px, transparent 1px);
-    background-size: 44px 44px; pointer-events:none;
-    -webkit-mask-image: radial-gradient(ellipse at 30% 40%, black, transparent 78%);
-    mask-image: radial-gradient(ellipse at 30% 40%, black, transparent 78%); }}
-  /* left hero */
-  .hero {{ flex: 1.35; min-width: 0; padding: 56px 60px; display: flex; flex-direction: column;
-    justify-content: center; gap: 30px; position: relative; z-index: 2; }}
-  .hero .tagline {{ display:inline-flex; align-items:center; gap:8px; padding:6px 13px; border-radius:999px;
-    background:rgba(249,115,22,0.1); border:1px solid rgba(249,115,22,0.22); color:#fdba74;
-    font-size:12.5px; font-weight:600; margin-bottom:18px; }}
-  .hero .dot {{ width:6px; height:6px; border-radius:50%; background:#f97316; display:inline-block; }}
-  .hero h1 {{ font-family:'Space Grotesk',sans-serif; font-size:38px; line-height:1.12; font-weight:700;
-    letter-spacing:-0.025em; margin:0 0 12px; color:#f8fafc; }}
-  .hero .desc {{ font-size:15.5px; line-height:1.6; color:#94a3b8; max-width:440px; }}
-  .hero .desc .hl-cyan {{ color:#67e8f9; font-weight:600; }}
-  .hero .desc .hl-orange {{ color:#fdba74; font-weight:600; }}
-  /* chart card */
-  .chart-card {{
-    background:rgba(17,24,39,0.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
-    border:1px solid rgba(148,163,184,0.13); border-radius:18px; padding:22px 24px 24px;
-    max-width:560px; box-shadow:0 40px 90px -30px rgba(0,0,0,0.7);
-    animation: floaty 7s ease-in-out infinite;
-  }}
-  .chart-live {{ display:flex; align-items:center; gap:9px; }}
-  .live-dot {{ width:8px; height:8px; border-radius:50%; background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,0.18); display:inline-block; }}
-  .chart-title {{ font-size:13.5px; font-weight:700; color:#e2e8f0; letter-spacing:-0.01em; }}
-  .legend {{ display:flex; align-items:center; gap:16px; margin:14px 0 6px; }}
-  .leg-dot {{ width:10px; height:3px; border-radius:2px; display:inline-block; margin-right:7px; }}
-  .leg-label {{ font-size:12px; font-weight:600; color:#cbd5e1; }}
-  .chart-sublabel {{ font-size:11px; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }}
-  .chart-xlabels {{ display:flex; justify-content:space-between; margin-top:7px; }}
-  .chart-xlabels span {{ font-size:10px; color:#64748b; font-weight:500; }}
-  /* right sign-in */
-  .signin-col {{ flex: 0 0 540px; max-width:540px; display:flex; align-items:center; justify-content:center;
-    padding:40px; position:relative; z-index:2; }}
-  .signin-card {{
-    width:100%; max-width:400px; background:rgba(30,41,59,0.55);
-    backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
-    border:1px solid rgba(148,163,184,0.14); border-radius:22px; padding:44px 40px;
-    box-shadow:0 40px 100px -30px rgba(0,0,0,0.8);
-    animation: riseIn 0.6s cubic-bezier(0.16,1,0.3,1) both;
-    text-align:center;
-  }}
-  .signin-card img {{ height:32px; width:auto; display:block; margin:0 auto 28px; }}
-  .signin-card h2 {{ font-family:'Space Grotesk',sans-serif; font-size:23px; font-weight:600;
-    letter-spacing:-0.02em; margin:0 0 8px; color:#f8fafc; }}
-  .signin-card .sub {{ font-size:14px; color:#94a3b8; margin:0 0 32px; }}
-  .google-btn {{
-    width:100%; display:flex; align-items:center; justify-content:center; gap:11px;
-    background:#ffffff; border:1px solid #e2e8f0; border-radius:12px;
-    padding:14px 20px; cursor:pointer;
-    font-family:'Manrope',sans-serif; font-size:15px; font-weight:600; color:#1f2937;
-    box-shadow:0 2px 10px rgba(0,0,0,0.25);
-    transition:transform 0.18s ease, box-shadow 0.18s ease;
-    outline:none;
-  }}
-  .google-btn:hover {{ transform:translateY(-1px); box-shadow:0 12px 26px -8px rgba(0,0,0,0.5); }}
-  .access-note {{ display:flex; align-items:center; justify-content:center; gap:7px;
-    margin-top:26px; color:#64748b; font-size:12.5px; }}
-  .access-note .bold {{ color:#94a3b8; font-weight:600; }}
-  .signin-footer {{ margin-top:34px; padding-top:20px; border-top:1px solid rgba(148,163,184,0.1);
-    font-size:11.5px; color:#475569; text-align:center; }}
-</style>
-</head>
-<body>
-<div class="wrap">
-  <div class="blob1"></div>
-  <div class="blob2"></div>
-  <div class="grid"></div>
 
-  <!-- LEFT hero -->
-  <div class="hero">
-    <div>
-      <img src="{_dark_logo_src}" alt="Spyne" style="height:30px; width:auto; display:block;" onerror="this.style.display='none'">
-      <p style="font-size:13.5px; color:#94a3b8; margin:13px 0 0; letter-spacing:0.01em;">Enabling dealerships to sell cars faster.</p>
-    </div>
-    <div style="max-width:540px;">
-      <div class="tagline"><span class="dot"></span>Finance &middot; Accounts Receivable</div>
-      <h1>Collections command center</h1>
-      <p class="desc">Live AR performance across <span class="hl-cyan">Studio</span> and <span class="hl-orange">Vini AI</span> &mdash; outstanding, aging and recovery in one view.</p>
-    </div>
-    <!-- floating chart -->
+    # ── LEFT panel: hero + chart (no interactive elements → safe in iframe) ─────
+    _components.html(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@600;700&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+<style>
+* {{ box-sizing:border-box; margin:0; padding:0; }}
+html,body {{ height:100%; background:#0b1120; color:#f1f5f9; font-family:'Manrope',sans-serif; overflow:hidden; }}
+@keyframes floaty {{ 0%,100% {{ transform:translateY(0); }} 50% {{ transform:translateY(-9px); }} }}
+.hero {{ height:100vh; padding:56px 60px; display:flex; flex-direction:column; justify-content:center; gap:30px; position:relative; overflow:hidden; }}
+.blob1 {{ position:absolute; top:-200px; left:-120px; width:620px; height:620px; border-radius:50%; background:radial-gradient(circle,rgba(249,115,22,0.18),transparent 62%); filter:blur(20px); pointer-events:none; }}
+.blob2 {{ position:absolute; bottom:-260px; right:-10%; width:680px; height:680px; border-radius:50%; background:radial-gradient(circle,rgba(34,211,238,0.13),transparent 62%); filter:blur(20px); pointer-events:none; }}
+.grid {{ position:absolute; inset:0; background-image:linear-gradient(rgba(148,163,184,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,0.04) 1px,transparent 1px); background-size:44px 44px; -webkit-mask-image:radial-gradient(ellipse at 30% 40%,black,transparent 78%); mask-image:radial-gradient(ellipse at 30% 40%,black,transparent 78%); }}
+.content {{ position:relative; z-index:2; }}
+.tagline {{ display:inline-flex; align-items:center; gap:8px; padding:6px 13px; border-radius:999px; background:rgba(249,115,22,0.1); border:1px solid rgba(249,115,22,0.22); color:#fdba74; font-size:12.5px; font-weight:600; margin-bottom:18px; }}
+.dot {{ width:6px; height:6px; border-radius:50%; background:#f97316; display:inline-block; }}
+h1 {{ font-family:'Space Grotesk',sans-serif; font-size:36px; line-height:1.12; font-weight:700; letter-spacing:-0.025em; margin:0 0 12px; color:#f8fafc; }}
+.desc {{ font-size:15px; line-height:1.6; color:#94a3b8; max-width:440px; }}
+.hl-cyan {{ color:#67e8f9; font-weight:600; }}
+.hl-orange {{ color:#fdba74; font-weight:600; }}
+.chart-card {{ background:rgba(17,24,39,0.72); backdrop-filter:blur(14px); border:1px solid rgba(148,163,184,0.13); border-radius:18px; padding:22px 24px 24px; max-width:560px; box-shadow:0 40px 90px -30px rgba(0,0,0,0.7); animation:floaty 7s ease-in-out infinite; }}
+.live-dot {{ width:8px; height:8px; border-radius:50%; background:#22c55e; box-shadow:0 0 0 3px rgba(34,197,94,0.18); display:inline-block; }}
+.leg-line {{ width:10px; height:3px; border-radius:2px; display:inline-block; margin-right:7px; }}
+.xlabels {{ display:flex; justify-content:space-between; margin-top:7px; }}
+.xlabels span {{ font-size:10px; color:#64748b; font-weight:500; }}
+</style></head>
+<body>
+<div class="hero">
+  <div class="blob1"></div><div class="blob2"></div><div class="grid"></div>
+  <div class="content">
+    <img src="{_dark_logo_src}" style="height:30px;width:auto;display:block;margin-bottom:13px;" onerror="this.style.display='none'" alt="Spyne">
+    <p style="font-size:13.5px;color:#94a3b8;letter-spacing:0.01em;">Enabling dealerships to sell cars faster.</p>
+  </div>
+  <div class="content" style="max-width:540px;">
+    <div class="tagline"><span class="dot"></span>Finance &middot; Accounts Receivable</div>
+    <h1>Collections command center</h1>
+    <p class="desc">Live AR performance across <span class="hl-cyan">Studio</span> and <span class="hl-orange">Vini AI</span> &mdash; outstanding, aging and recovery in one view.</p>
+  </div>
+  <div class="content">
     <div class="chart-card">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px;">
-        <div class="chart-live">
-          <span class="live-dot"></span>
-          <span class="chart-title">AR Collections &middot; Overview</span>
-        </div>
-        <div style="display:flex; gap:4px; padding:3px; border-radius:9px; background:rgba(148,163,184,0.08); border:1px solid rgba(148,163,184,0.1);">
-          <span style="font-size:11.5px; font-weight:600; padding:5px 11px; border-radius:7px; background:#f1f5f9; color:#0f172a;">Monthly</span>
-          <span style="font-size:11.5px; font-weight:600; padding:5px 11px; border-radius:7px; color:#94a3b8;">Quarter</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="display:flex;align-items:center;gap:9px;"><span class="live-dot"></span><span style="font-size:13.5px;font-weight:700;color:#e2e8f0;">AR Collections &middot; Overview</span></div>
+        <div style="display:flex;gap:4px;padding:3px;border-radius:9px;background:rgba(148,163,184,0.08);border:1px solid rgba(148,163,184,0.1);">
+          <span style="font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:7px;background:#f1f5f9;color:#0f172a;">Monthly</span>
+          <span style="font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:7px;color:#94a3b8;">Quarter</span>
         </div>
       </div>
-      <div class="legend">
-        <span style="display:flex;align-items:center;"><span class="leg-dot" style="background:#22d3ee;"></span><span class="leg-label">Studio</span></span>
-        <span style="display:flex;align-items:center;"><span class="leg-dot" style="background:#fb923c;"></span><span class="leg-label">Vini AI</span></span>
+      <div style="display:flex;gap:16px;margin-bottom:6px;">
+        <span style="display:flex;align-items:center;font-size:12px;font-weight:600;color:#cbd5e1;"><span class="leg-line" style="background:#22d3ee;"></span>Studio</span>
+        <span style="display:flex;align-items:center;font-size:12px;font-weight:600;color:#cbd5e1;"><span class="leg-line" style="background:#fb923c;"></span>Vini AI</span>
       </div>
-      <div class="chart-sublabel">Collections recovered</div>
-      <svg viewBox="0 0 100 42" preserveAspectRatio="none" style="width:100%; height:140px; display:block;">
+      <div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">Collections recovered</div>
+      <svg viewBox="0 0 100 42" preserveAspectRatio="none" style="width:100%;height:140px;display:block;">
         <defs>
-          <linearGradient id="gS" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style="stop-color:#22d3ee; stop-opacity:0.34"></stop>
-            <stop offset="1" style="stop-color:#22d3ee; stop-opacity:0"></stop>
-          </linearGradient>
-          <linearGradient id="gV" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" style="stop-color:#fb923c; stop-opacity:0.30"></stop>
-            <stop offset="1" style="stop-color:#fb923c; stop-opacity:0"></stop>
-          </linearGradient>
+          <linearGradient id="gS" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:#22d3ee;stop-opacity:0.34"></stop><stop offset="1" style="stop-color:#22d3ee;stop-opacity:0"></stop></linearGradient>
+          <linearGradient id="gV" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:#fb923c;stop-opacity:0.30"></stop><stop offset="1" style="stop-color:#fb923c;stop-opacity:0"></stop></linearGradient>
         </defs>
         <line x1="0" y1="11" x2="100" y2="11" style="stroke:rgba(148,163,184,0.1);stroke-width:1;vector-effect:non-scaling-stroke;"></line>
         <line x1="0" y1="22" x2="100" y2="22" style="stroke:rgba(148,163,184,0.1);stroke-width:1;vector-effect:non-scaling-stroke;"></line>
         <line x1="0" y1="33" x2="100" y2="33" style="stroke:rgba(148,163,184,0.1);stroke-width:1;vector-effect:non-scaling-stroke;"></line>
-        <path d="M 0.00 35.00 L 20.00 29.00 L 40.00 30.00 L 60.00 22.00 L 80.00 19.00 L 100.00 10.00 L 100.00 42.00 L 0.00 42.00 Z" style="fill:url(#gV);"></path>
-        <path d="M 0.00 27.00 L 20.00 20.00 L 40.00 21.00 L 60.00 13.00 L 80.00 10.00 L 100.00 5.00 L 100.00 42.00 L 0.00 42.00 Z" style="fill:url(#gS);"></path>
-        <path d="M 0.00 35.00 L 20.00 29.00 L 40.00 30.00 L 60.00 22.00 L 80.00 19.00 L 100.00 10.00" style="fill:none;stroke:#fb923c;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round;"></path>
-        <path d="M 0.00 27.00 L 20.00 20.00 L 40.00 21.00 L 60.00 13.00 L 80.00 10.00 L 100.00 5.00" style="fill:none;stroke:#22d3ee;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round;"></path>
+        <path d="M 0 35 L 20 29 L 40 30 L 60 22 L 80 19 L 100 10 L 100 42 L 0 42 Z" style="fill:url(#gV);"></path>
+        <path d="M 0 27 L 20 20 L 40 21 L 60 13 L 80 10 L 100 5 L 100 42 L 0 42 Z" style="fill:url(#gS);"></path>
+        <path d="M 0 35 L 20 29 L 40 30 L 60 22 L 80 19 L 100 10" style="fill:none;stroke:#fb923c;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round;"></path>
+        <path d="M 0 27 L 20 20 L 40 21 L 60 13 L 80 10 L 100 5" style="fill:none;stroke:#22d3ee;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round;"></path>
       </svg>
-      <div class="chart-xlabels">
-        <span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT sign-in -->
-  <div class="signin-col">
-    <div class="signin-card">
-      <img src="{_dark_logo_src}" alt="Spyne" onerror="this.style.display='none'">
-      <h2>AR Collections Dashboard</h2>
-      <p class="sub">Finance Team &middot; Spyne.ai</p>
-      {_btn_html}
-      <div class="access-note">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="display:block;">
-          <rect x="4" y="11" width="16" height="10" rx="2"></rect>
-          <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
-        </svg>
-        <span>Access restricted to <span class="bold">@spyne.ai</span> accounts</span>
-      </div>
-      <div class="signin-footer">Secured by Google OAuth &middot; SSO enforced</div>
+      <div class="xlabels"><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span></div>
     </div>
   </div>
 </div>
-<script>
-  // Resize iframe to fill the Streamlit viewport
-  function resizeParent() {{
-    try {{
-      window.parent.document.querySelectorAll('iframe').forEach(function(f) {{
-        if (f.contentWindow === window) {{
-          f.style.height = window.screen.height + 'px';
-          f.style.width = '100%';
-          f.style.border = 'none';
-          f.style.display = 'block';
-        }}
-      }});
-    }} catch(e) {{}}
-  }}
-  window.addEventListener('load', resizeParent);
-</script>
-</body>
-</html>""", height=800, scrolling=False)
+</body></html>""", height=700, scrolling=False)
+
+    # ── RIGHT panel: sign-in card with Google button via st.markdown (no iframe) ─
+    # Using st.markdown keeps the <a href> in the main page DOM → no sandbox issues
+    _google_svg = """<svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" style="display:block;flex-shrink:0;">
+      <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"></path>
+      <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"></path>
+      <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"></path>
+      <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"></path>
+    </svg>"""
+
+    if google_configured:
+        _btn = f"""<a href="{auth_url}" style="display:flex;align-items:center;justify-content:center;gap:11px;
+            width:100%;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;
+            padding:14px 20px;text-decoration:none;
+            font-family:Manrope,-apple-system,sans-serif;font-size:15px;font-weight:600;color:#1f2937;
+            box-shadow:0 2px 10px rgba(0,0,0,0.25);">{_google_svg}Sign in with Google</a>"""
+    else:
+        _btn = '<p style="color:#ef4444;font-size:13px;text-align:center;">Google login not configured. Contact admin.</p>'
+
+    st.markdown(f"""
+    <style>
+    /* Position the sign-in card fixed on the right side over the iframe */
+    #signin-overlay {{
+        position: fixed;
+        top: 0; right: 0;
+        width: 520px; height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        padding: 40px; z-index: 999;
+        pointer-events: none;
+    }}
+    #signin-card {{
+        pointer-events: all;
+        width: 100%; max-width: 400px;
+        background: rgba(30,41,59,0.60);
+        backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+        border: 1px solid rgba(148,163,184,0.14);
+        border-radius: 22px; padding: 44px 40px;
+        box-shadow: 0 40px 100px -30px rgba(0,0,0,0.8);
+        text-align: center;
+        font-family: Manrope, -apple-system, sans-serif;
+    }}
+    #signin-card img {{ height:32px;width:auto;display:block;margin:0 auto 28px; }}
+    #signin-card h2 {{
+        font-family: 'Space Grotesk', sans-serif; font-size:23px; font-weight:600;
+        letter-spacing:-0.02em; margin:0 0 8px; color:#f8fafc;
+    }}
+    #signin-card .sub {{ font-size:14px; color:#94a3b8; margin:0 0 32px; }}
+    .access-note {{ display:flex;align-items:center;justify-content:center;gap:7px;
+        margin-top:26px;color:#64748b;font-size:12.5px; }}
+    .access-note b {{ color:#94a3b8;font-weight:600; }}
+    .signin-footer {{ margin-top:34px;padding-top:20px;
+        border-top:1px solid rgba(148,163,184,0.1);
+        font-size:11.5px;color:#475569;text-align:center; }}
+    </style>
+    <div id="signin-overlay">
+      <div id="signin-card">
+        <img src="{_dark_logo_src}" onerror="this.style.display='none'" alt="Spyne">
+        <h2>AR Collections Dashboard</h2>
+        <p class="sub">Finance Team &middot; Spyne.ai</p>
+        {_btn}
+        <div class="access-note">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <rect x="4" y="11" width="16" height="10" rx="2"></rect>
+            <path d="M8 11V7a4 4 0 0 1 8 0v4"></path>
+          </svg>
+          <span>Access restricted to <b>@spyne.ai</b> accounts</span>
+        </div>
+        <div class="signin-footer">Secured by Google OAuth &middot; SSO enforced</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     return False
 
