@@ -673,69 +673,85 @@ def _login_page():
 
     if google_configured:
         auth_url = _google_auth_url(client_id, redirect_uri)
-        _btn_html = f"""<a href="{auth_url}" style="display:block;text-decoration:none;">
+        _btn_html = f"""<a href="{auth_url}" style="display:block;text-decoration:none;margin-bottom:0;">
             <div style="display:flex;align-items:center;justify-content:center;gap:12px;
             background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;
             padding:13px 20px;cursor:pointer;
             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
             font-size:15px;font-weight:600;color:#1e293b;
             box-shadow:0 2px 8px rgba(0,0,0,0.12);">
-            <svg width="20" height="20" viewBox="0 0 18 18">
-              <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
-              <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-              <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/>
-              <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+            <svg width="20" height="20" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+              <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"></path>
+              <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"></path>
+              <path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"></path>
+              <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"></path>
             </svg>
             Sign in with Google
             </div></a>"""
     else:
-        _btn_html = '<p style="color:#ef4444;font-size:13px;">⚙️ Google login not configured. Contact admin.</p>'
+        _btn_html = '<p style="color:#ef4444;font-size:13px;">Google login not configured. Contact admin.</p>'
 
-    st.markdown(f"""
+    # Use st.markdown only for the background + CSS; render the card via components.html
+    # to bypass Streamlit's markdown HTML sanitizer which escapes nested tags.
+    st.markdown("""
     <style>
-    [data-testid="stAppViewContainer"] {{
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%) !important;
         min-height: 100vh;
-    }}
-    [data-testid="stHeader"] {{ background: transparent; }}
-    [data-testid="stMainBlockContainer"] {{ padding-top: 0 !important; }}
+    }
+    [data-testid="stHeader"] { background: transparent !important; }
+    [data-testid="stMainBlockContainer"] { padding-top: 0 !important; }
     </style>
-    <div style="
-        display:flex; flex-direction:column; align-items:center; justify-content:center;
-        min-height:90vh; padding:20px;
-    ">
-        <div style="
-            background:rgba(255,255,255,0.05);
-            border:1px solid rgba(255,255,255,0.1);
-            border-radius:20px;
-            padding:48px 44px 40px;
-            width:100%; max-width:420px;
-            box-shadow:0 25px 60px rgba(0,0,0,0.5);
-            backdrop-filter:blur(12px);
-            text-align:center;
-        ">
-            <img src="{_login_logo}"
-                 style="height:44px; object-fit:contain; margin-bottom:28px;"
-                 onerror="this.style.display='none'" />
-
-            <h1 style="
-                color:#f1f5f9; font-size:22px; font-weight:700;
-                margin:0 0 6px; letter-spacing:-0.3px;
-            ">AR Collections Dashboard</h1>
-            <p style="color:#94a3b8; font-size:13px; margin:0 0 32px;">
-                Finance Team &middot; Spyne.ai
-            </p>
-
-            <div style="border-top:1px solid rgba(255,255,255,0.08); margin-bottom:28px;"></div>
-
-            {_btn_html}
-
-            <p style="color:#64748b; font-size:11.5px; margin:24px 0 0;">
-                &#128274; Access restricted to @spyne.ai accounts
-            </p>
-        </div>
-    </div>
     """, unsafe_allow_html=True)
+
+    import streamlit.components.v1 as _components
+    _components.html(f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8">
+    <style>
+      * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+      body {{
+        background: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 420px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }}
+      .card {{
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 20px;
+        padding: 44px 40px 36px;
+        width: 100%;
+        max-width: 400px;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.5);
+        backdrop-filter: blur(12px);
+        text-align: center;
+      }}
+      .card img {{ height: 42px; object-fit: contain; margin-bottom: 24px; }}
+      .card h1 {{
+        color: #f1f5f9; font-size: 21px; font-weight: 700;
+        margin: 0 0 6px; letter-spacing: -0.3px;
+      }}
+      .card .sub {{ color: #94a3b8; font-size: 13px; margin: 0 0 28px; }}
+      .divider {{ border-top: 1px solid rgba(255,255,255,0.09); margin-bottom: 24px; }}
+      .footer {{ color: #64748b; font-size: 11.5px; margin: 20px 0 0; }}
+    </style>
+    </head>
+    <body>
+    <div class="card">
+      <img src="{_login_logo}" onerror="this.style.display='none'" alt="Spyne" />
+      <h1>AR Collections Dashboard</h1>
+      <p class="sub">Finance Team &middot; Spyne.ai</p>
+      <div class="divider"></div>
+      {_btn_html}
+      <p class="footer">&#128274; Access restricted to @spyne.ai accounts</p>
+    </div>
+    </body>
+    </html>
+    """, height=420)
 
     return False
 
