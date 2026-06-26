@@ -675,7 +675,7 @@ def _login_page():
 
     if google_configured:
         auth_url = _google_auth_url(client_id, redirect_uri)
-        _btn_html = f"""<a href="{auth_url}" class="google-btn" target="_top">
+        _btn_html = f"""<button class="google-btn" onclick="window.top.location.href='{auth_url}'">
             <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
               <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"></path>
               <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"></path>
@@ -683,7 +683,7 @@ def _login_page():
               <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"></path>
             </svg>
             Sign in with Google
-        </a>"""
+        </button>"""
     else:
         _btn_html = '<p style="color:#ef4444;font-size:13px;text-align:center;">Google login not configured. Contact admin.</p>'
 
@@ -774,10 +774,11 @@ def _login_page():
   .google-btn {{
     width:100%; display:flex; align-items:center; justify-content:center; gap:11px;
     background:#ffffff; border:1px solid #e2e8f0; border-radius:12px;
-    padding:14px 20px; cursor:pointer; text-decoration:none;
+    padding:14px 20px; cursor:pointer;
     font-family:'Manrope',sans-serif; font-size:15px; font-weight:600; color:#1f2937;
     box-shadow:0 2px 10px rgba(0,0,0,0.25);
     transition:transform 0.18s ease, box-shadow 0.18s ease;
+    outline:none;
   }}
   .google-btn:hover {{ transform:translateY(-1px); box-shadow:0 12px 26px -8px rgba(0,0,0,0.5); }}
   .access-note {{ display:flex; align-items:center; justify-content:center; gap:7px;
