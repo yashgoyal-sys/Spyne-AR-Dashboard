@@ -2200,6 +2200,60 @@ def rag_badge(val):
     return f"{icons.get(str(val), '⚪')} {val}"
 
 
+def _themed_table(df, fmt_map=None, col_color=None, height=520):
+    """Render a DataFrame as a theme-aware HTML table (follows the dark/light toggle).
+    fmt_map:   {col: format-string or callable} for value formatting.
+    col_color: callable(col_name) -> CSS color string for that column's cells (or None).
+    """
+    import html as _html
+    fmt_map = fmt_map or {}
+
+    def _fmt(col, v):
+        f = fmt_map.get(col)
+        try:
+            if callable(f):   return f(v)
+            if isinstance(f, str): return f.format(v)
+        except Exception:
+            pass
+        return "" if v is None else str(v)
+
+    numeric = {c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])}
+
+    head = "".join(
+        f'<th style="text-align:{"right" if c in numeric else "left"};">{_html.escape(str(c))}</th>'
+        for c in df.columns
+    )
+    body_rows = []
+    for _, row in df.iterrows():
+        cells = []
+        for c in df.columns:
+            color = col_color(c) if col_color else None
+            align = "right" if c in numeric else "left"
+            style = f"text-align:{align};"
+            if color:
+                style += f"color:{color};font-weight:700;"
+            cells.append(f'<td style="{style}">{_html.escape(_fmt(c, row[c]))}</td>')
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    body = "".join(body_rows)
+
+    st.markdown(
+        f"""<style>
+        .ar-tbl-wrap {{ max-height:{height}px; overflow:auto; border:1px solid var(--ar-border);
+            border-radius:14px; box-shadow:var(--ar-shadow); background:var(--ar-panel); }}
+        .ar-tbl {{ width:100%; border-collapse:collapse; font-family:'Manrope',sans-serif; }}
+        .ar-tbl th {{ position:sticky; top:0; background:var(--ar-panel2); color:var(--ar-faint);
+            font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
+            padding:12px 16px; border-bottom:1px solid var(--ar-border); white-space:nowrap; z-index:1; }}
+        .ar-tbl td {{ padding:11px 16px; font-size:13.5px; color:var(--ar-text);
+            border-bottom:1px solid var(--ar-border); white-space:nowrap; }}
+        .ar-tbl tbody tr:hover {{ background:var(--ar-hover); }}
+        </style>
+        <div class="ar-tbl-wrap"><table class="ar-tbl">
+        <thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def export_excel(df):
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -3484,22 +3538,15 @@ with tab_csm:
     for c in rag_out_cols:
         fmt_map[c] = val_fmt
 
-    def _rag_col_style(col):
-        colors = {
-            "Red":   "color:#f87171;font-weight:700",
-            "Amber": "color:#fbbf24;font-weight:700",
-            "Green": "color:#34d399;font-weight:700",
-        }
-        for key, style in colors.items():
-            if col.name.startswith(key):
-                return [style] * len(col)
-        return [""] * len(col)
+    def _rag_col_color(name):
+        if name.startswith("Red"):   return "#f87171"
+        if name.startswith("Amber"): return "#fbbf24"
+        if name.startswith("Green"): return "#34d399"
+        return None
 
-    st.dataframe(
-        show_df.style.format(fmt_map).apply(_rag_col_style, axis=0),
-        use_container_width=True,
+    _themed_table(
+        show_df, fmt_map=fmt_map, col_color=_rag_col_color,
         height=min(80 + len(show_df) * 35, 520),
-        hide_index=True,
     )
 
     st.download_button(
@@ -3646,22 +3693,15 @@ with tab_customer:
     for c in rag_out_cols_c:
         fmt_map_c[c] = val_fmt_c
 
-    def _rag_cust_style(col):
-        colors = {
-            "Red":   "color:#f87171;font-weight:700",
-            "Amber": "color:#fbbf24;font-weight:700",
-            "Green": "color:#34d399;font-weight:700",
-        }
-        for key, style in colors.items():
-            if col.name.startswith(key):
-                return [style] * len(col)
-        return [""] * len(col)
+    def _rag_cust_color(name):
+        if name.startswith("Red"):   return "#f87171"
+        if name.startswith("Amber"): return "#fbbf24"
+        if name.startswith("Green"): return "#34d399"
+        return None
 
-    st.dataframe(
-        show_cust.style.format(fmt_map_c).apply(_rag_cust_style, axis=0),
-        use_container_width=True,
+    _themed_table(
+        show_cust, fmt_map=fmt_map_c, col_color=_rag_cust_color,
         height=min(80 + len(show_cust) * 35, 520),
-        hide_index=True,
     )
 
     st.download_button(
