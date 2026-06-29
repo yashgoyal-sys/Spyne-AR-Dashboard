@@ -365,6 +365,67 @@ def _get_google_cfg():
     except Exception:
         return None, None, None
 
+# ── Persistent session token (survives full page refresh via URL query param) ──
+import hmac as _hmac
+
+_SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
+def _session_secret() -> str:
+    """Stable signing key — reuse the OAuth client_secret (already secret & stable)."""
+    _, cs, _ = _get_google_cfg()
+    return cs or "ar-dashboard-fallback-secret"
+
+def _make_session_token(email: str, role: str, csm_name: str | None) -> str:
+    payload = {
+        "email": email, "role": role, "csm": csm_name or "",
+        "exp": int(time.time()) + _SESSION_TTL_SECONDS,
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    body = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    sig = _hmac.new(_session_secret().encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
+    return f"{body}.{sig}"
+
+def _verify_session_token(token: str):
+    """Return payload dict if token is valid & unexpired, else None."""
+    try:
+        body, sig = token.split(".", 1)
+        expected = _hmac.new(_session_secret().encode(), body.encode(), hashlib.sha256).hexdigest()[:32]
+        if not _hmac.compare_digest(sig, expected):
+            return None
+        pad = "=" * (-len(body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(body + pad))
+        if payload.get("exp", 0) < int(time.time()):
+            return None
+        return payload
+    except Exception:
+        return None
+
+def _restore_session_from_token() -> bool:
+    """If a valid session token is in the URL, restore auth state. Returns True if restored."""
+    if st.session_state.get("_authenticated"):
+        return True
+    try:
+        tok = st.query_params.get("s")
+    except Exception:
+        tok = None
+    if not tok:
+        return False
+    payload = _verify_session_token(tok)
+    if not payload:
+        return False
+    # Re-validate the role still exists (revocation-safe)
+    email = payload.get("email", "")
+    role, csm_name = _get_email_role(email)
+    if not role:
+        return False
+    st.session_state["_authenticated"] = True
+    st.session_state["_username"]      = email
+    st.session_state["_role"]          = role
+    st.session_state["_google_email"]  = email
+    if role == "csm" and (csm_name or payload.get("csm")):
+        st.session_state["_csm_name"] = csm_name or payload.get("csm")
+    return True
+
 def _google_auth_url(client_id, redirect_uri):
     params = {
         "client_id": client_id,
@@ -593,6 +654,10 @@ def _login_page():
     if st.session_state.get("_authenticated"):
         return True
 
+    # Restore session across full page refresh (token persisted in URL query param)
+    if _restore_session_from_token():
+        return True
+
     client_id, client_secret, redirect_uri = _get_google_cfg()
     google_configured = bool(client_id and client_secret and redirect_uri)
 
@@ -633,6 +698,8 @@ def _login_page():
             st.session_state["_google_email"]  = email
             if role == "csm" and csm_name:
                 st.session_state["_csm_name"] = csm_name
+            # Persist a signed token in the URL so refresh (F5) keeps the session
+            st.query_params["s"] = _make_session_token(email, role, csm_name)
             st.rerun()
             return True
 
@@ -2428,6 +2495,11 @@ with st.sidebar:
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state["_authenticated"] = False
         st.session_state["_username"]      = ""
+        # Clear the persistent session token from the URL
+        try:
+            st.query_params.clear()
+        except Exception:
+            pass
         st.rerun()
     st.divider()
 
