@@ -2279,10 +2279,22 @@ def _fmt_fig(fig):
                     else "<b>%{fullData.name}</b><br>"
                          "%{y}: <b>%{x:,.0f}</b><extra></extra>"
                 )
+    # ── Theme-aware styling so charts follow the dark/light toggle ─────────────
+    _tk = globals().get("_T") or {"text": "#f1f5f9", "muted": "#94a3b8", "border": "rgba(148,163,184,0.18)"}
+    _txt, _grid = _tk["text"], _tk["border"]
     fig.update_layout(
         yaxis=dict(tickformat=",.0f"),
         xaxis=dict(tickformat=",.0f"),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color=_txt, family="Manrope, sans-serif"),
+        title=dict(font=dict(color=_txt)),
+        legend=dict(font=dict(color=_txt)),
     )
+    fig.update_xaxes(gridcolor=_grid, zerolinecolor=_grid, linecolor=_grid,
+                     tickfont=dict(color=_txt), title=dict(font=dict(color=_txt)))
+    fig.update_yaxes(gridcolor=_grid, zerolinecolor=_grid, linecolor=_grid,
+                     tickfont=dict(color=_txt), title=dict(font=dict(color=_txt)))
     return fig
 
 
@@ -3328,7 +3340,7 @@ if tab_overview is not None:
                     hole=0.4,
                 )
                 fig.update_traces(textinfo="percent+label")
-                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
         with c2:
             if "Bucket" in fdf.columns and "RAG" in fdf.columns:
@@ -3348,7 +3360,7 @@ if tab_overview is not None:
                     text_auto=",.0f",
                 )
                 fig.update_layout(xaxis_title="", yaxis_title="USD", legend_title="RAG")
-                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
         st.divider()
 
@@ -3391,7 +3403,7 @@ if tab_overview is not None:
                              orientation="h", title="Top 10 Countries by Outstanding",
                              text_auto=",.0f")
                 fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
-                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
         with c4:
             if "Product" in fdf.columns:
@@ -3403,7 +3415,7 @@ if tab_overview is not None:
                              orientation="h", title="Top 10 Products by Outstanding",
                              text_auto=",.0f")
                 fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
-                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
         # ── Currency-wise outstanding (FC) with RAG ───────────────────────────────
         if "currency_code" in fdf.columns and "balance" in fdf.columns and "RAG" in fdf.columns:
@@ -3431,7 +3443,7 @@ if tab_overview is not None:
                     xaxis_title="Currency", yaxis_title="FC Amount",
                     legend_title="RAG", xaxis_tickangle=-30,
                 )
-                st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+                st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
             with cc2:
                 # Pivot: currency rows × RAG columns
@@ -3568,7 +3580,7 @@ with tab_csm:
         text_auto=",.0f",
     )
     fig.update_layout(xaxis_tickangle=-30, coloraxis_showscale=False)
-    st.plotly_chart(_fmt_fig(fig), use_container_width=True)
+    st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
     # ── Stacked RAG bar ───────────────────────────────────────────────────────
     if rag_out_cols:
@@ -3582,7 +3594,7 @@ with tab_csm:
                       title="Outstanding by RAG per CSM", text_auto=",.0f",
                       labels={"Amount": "Outstanding (₹)" if val_col == "Outstanding" else "Outstanding (USD)"})
         fig2.update_layout(xaxis_tickangle=-30)
-        st.plotly_chart(_fmt_fig(fig2), use_container_width=True)
+        st.plotly_chart(_fmt_fig(fig2), use_container_width=True, theme=None)
 
     st.divider()
     st.subheader("CSM Deep Dive")
@@ -3727,7 +3739,7 @@ with tab_customer:
         text_auto=",.0f",
     )
     fig_c.update_layout(xaxis_tickangle=-30, coloraxis_showscale=False)
-    st.plotly_chart(_fmt_fig(fig_c), use_container_width=True)
+    st.plotly_chart(_fmt_fig(fig_c), use_container_width=True, theme=None)
 
     # ── Stacked RAG bar ───────────────────────────────────────────────────────
     if rag_out_cols_c:
@@ -3743,7 +3755,7 @@ with tab_customer:
             labels={"Amount": val_lbl_c},
         )
         fig_c2.update_layout(xaxis_tickangle=-30)
-        st.plotly_chart(_fmt_fig(fig_c2), use_container_width=True)
+        st.plotly_chart(_fmt_fig(fig_c2), use_container_width=True, theme=None)
 
     st.divider()
 
