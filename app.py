@@ -2765,12 +2765,16 @@ html, body, .stApp, [data-testid="stMarkdownContainer"] {{
 
 /* ── Tabs ───────────────────────────────────────────────────────────────── */
 div[data-testid="stTabs"] [data-baseweb="tab-list"] {{
-    gap: 2px; border-bottom: 1px solid var(--ar-border);
+    gap: 22px; border-bottom: 1px solid var(--ar-border);
 }}
 div[data-testid="stTabs"] button {{
     font-family: 'Manrope', sans-serif !important;
     font-size: 14px !important; font-weight: 600 !important;
     color: var(--ar-muted) !important; background: transparent !important;
+    padding-left: 4px !important; padding-right: 4px !important;
+}}
+div[data-testid="stTabs"] button [data-testid="stMarkdownContainer"] p {{
+    gap: 7px;
 }}
 div[data-testid="stTabs"] button[aria-selected="true"] {{
     color: var(--ar-text) !important;
