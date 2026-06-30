@@ -2469,7 +2469,7 @@ def reason_form(level: str, identifiers, label: str, df_ref: pd.DataFrame = None
                     display["Total Outstanding"] = display[label].apply(
                         lambda c: _cust_fc_string(c, _ob_col))
 
-        st.dataframe(display, use_container_width=True, height=300)
+        _themed_table(display, height=300)
 
         dl_bytes = export_excel(display)
         st.download_button(
@@ -3115,7 +3115,7 @@ with _src_tab_zoho:
             if "_zoho_lineitems" in st.session_state and not st.session_state["_zoho_lineitems"].empty:
                 with st.expander("📦 Line Items (Product-level)", expanded=False):
                     _li_show = st.session_state["_zoho_lineitems"]
-                    st.dataframe(_li_show, use_container_width=True, height=300)
+                    _themed_table(_li_show, height=300)
                     st.download_button(
                         "⬇ Download Line Items",
                         data=export_excel(_li_show),
@@ -3381,15 +3381,13 @@ if tab_overview is not None:
             pivot["Total"] = pivot.sum(axis=1)
             pivot.loc["Grand Total"] = pivot.sum()
 
-            fmt_map = {c: "${:,.0f}" for c in pivot.columns}
-            def _col_color(col):
-                colors = {"Green": "color:#10b981;font-weight:600",
-                          "Amber": "color:#f59e0b;font-weight:600",
-                          "Red":   "color:#ef4444;font-weight:600"}
-                return [colors.get(col.name, "")] * len(col)
-
-            styled = pivot.style.format(fmt_map).apply(_col_color, axis=0)
-            st.dataframe(styled, use_container_width=True)
+            _bp = pivot.reset_index()
+            _themed_table(
+                _bp,
+                fmt_map={c: "${:,.0f}" for c in ["Green", "Amber", "Red", "Total"]},
+                col_color=lambda n: {"Green": "#34d399", "Amber": "#fbbf24", "Red": "#f87171"}.get(n),
+                height=320,
+            )
 
         c3, c4 = st.columns(2)
 
@@ -3496,10 +3494,10 @@ if tab_overview is not None:
                         axis=1,
                     )
 
-                st.dataframe(
-                    display_curr.style.apply(_rag_style, axis=0),
-                    use_container_width=True,
-                    hide_index=True,
+                _themed_table(
+                    display_curr,
+                    col_color=lambda n: {"Green": "#34d399", "Amber": "#fbbf24", "Red": "#f87171"}.get(n),
+                    height=420,
                 )
 
 # ─────────────────────────── TAB 2 · CSM SUMMARY ─────────────────────────────
@@ -3612,7 +3610,7 @@ with tab_csm:
     if "Final USD" in csm_detail_show.columns:
         csm_detail_show = csm_detail_show.sort_values("Final USD", ascending=False)
     csm_detail_show = column_filters(csm_detail_show, key_prefix="csm_dd")
-    st.dataframe(csm_detail_show, use_container_width=True)
+    _themed_table(csm_detail_show, col_color=lambda n: None, height=480)
 
 # ─────────────────────────── TAB 3 · CUSTOMER SUMMARY ───────────────────────
 with tab_customer:
@@ -3784,7 +3782,7 @@ with tab_customer:
         "Outstanding" if "Outstanding" in dd_cols else dd_cols[0], ascending=False
     )
     cust_detail_show = column_filters(cust_detail_show, key_prefix="cust_dd")
-    st.dataframe(cust_detail_show, use_container_width=True)
+    _themed_table(cust_detail_show, height=480)
 
 
 # ─────────────────────────── TAB 4 · INVOICE DRILLDOWN ───────────────────────
@@ -4326,7 +4324,7 @@ if tab_email is not None:
                     prog.empty()
                     if ok:   st.success(f"✅ {ok} reminder(s) sent.")
                     if fail: st.error(f"❌ {fail} failed.")
-                    st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
+                    _themed_table(pd.DataFrame(results), height=320)
             else:
                 st.info("customer_name column not detected.")
 
@@ -4621,7 +4619,7 @@ if tab_email is not None:
                 if ok2:   st.success(f"✅ {ok2} email(s) sent to {ok2} customer(s).")
                 if skip2: st.info(f"⏭ {skip2} invoice(s) skipped — already sent in last 24h.")
                 if fail2: st.error(f"❌ {fail2} failed.")
-                st.dataframe(pd.DataFrame(results2), use_container_width=True, hide_index=True)
+                _themed_table(pd.DataFrame(results2), height=320)
 
         # ═══════════════════════════════════════════════════════════════════════════
         # SUB-TAB C · SENT LOG
@@ -4683,7 +4681,7 @@ if tab_email is not None:
                     )
                     display_log = display_log[_mask]
 
-                st.dataframe(display_log, use_container_width=True, height=450, hide_index=True)
+                _themed_table(display_log, height=450)
 
                 st.download_button(
                     "⬇ Download Log",
