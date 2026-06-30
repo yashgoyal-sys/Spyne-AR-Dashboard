@@ -2755,8 +2755,7 @@ _FIXED_SHEET_URL = "https://docs.google.com/spreadsheets/d/1pY_hPKVa8A-d6kbCnsuR
 file_bytes = None
 
 # ── Design system — theme tokens (matches "AR Dashboard UI design") ───────────
-st.session_state.setdefault("_theme", "light")  # Spyne.ai brand look by default
-_AR_THEME = st.session_state["_theme"]
+_AR_THEME = "light"  # Spyne.ai brand theme (single, fixed)
 
 _AR_TOKENS = {
     "dark": {
@@ -2941,7 +2940,7 @@ if _LOGO_B64:
 else:
     _logo_src = "https://logo.clearbit.com/spyne.ai"
 
-_banner_col, _theme_col, _refresh_col = st.columns([5, 1, 1])
+_banner_col, _refresh_col = st.columns([6, 1])
 
 with _banner_col:
     if _AR_THEME == "light":
@@ -2989,14 +2988,6 @@ with _banner_col:
         f'</div>',
         unsafe_allow_html=True,
     )
-
-with _theme_col:
-    st.markdown("<div style='padding-top:6px;'></div>", unsafe_allow_html=True)
-    _next_theme = "light" if _AR_THEME == "dark" else "dark"
-    _theme_label = "☀️ Light" if _AR_THEME == "dark" else "🌙 Dark"
-    if st.button(_theme_label, use_container_width=True, key="_theme_toggle"):
-        st.session_state["_theme"] = _next_theme
-        st.rerun()
 
 with _refresh_col:
     st.markdown("<div style='padding-top:6px;'></div>", unsafe_allow_html=True)
