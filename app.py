@@ -2755,7 +2755,7 @@ _FIXED_SHEET_URL = "https://docs.google.com/spreadsheets/d/1pY_hPKVa8A-d6kbCnsuR
 file_bytes = None
 
 # ── Design system — theme tokens (matches "AR Dashboard UI design") ───────────
-st.session_state.setdefault("_theme", "dark")
+st.session_state.setdefault("_theme", "light")  # Spyne.ai brand look by default
 _AR_THEME = st.session_state["_theme"]
 
 _AR_TOKENS = {
@@ -2766,12 +2766,13 @@ _AR_TOKENS = {
         "head1": "#0b2a6b", "head2": "#1e40af",
         "shadow": "0 24px 60px -32px rgba(0,0,0,0.8)",
     },
+    # Light = Spyne.ai brand aesthetic: clean white, near-black text, minimal, soft rounding
     "light": {
-        "bg": "#f4f6f9", "panel": "#ffffff", "panel2": "#fbfcfe",
-        "border": "#e6e9ef", "text": "#0f172a", "muted": "#5b6677",
-        "faint": "#94a3b8", "hover": "#f3f5f8", "accent": "#2563eb",
-        "head1": "#0b2a6b", "head2": "#2563eb",
-        "shadow": "0 1px 3px rgba(15,23,42,0.07), 0 10px 30px -18px rgba(15,23,42,0.22)",
+        "bg": "#f7f8fa", "panel": "#ffffff", "panel2": "#f7f8fa",
+        "border": "#ececf1", "text": "#0b0c0f", "muted": "#5b6472",
+        "faint": "#99a1ad", "hover": "#f5f6f8", "accent": "#111317",
+        "head1": "#ffffff", "head2": "#ffffff",
+        "shadow": "0 1px 2px rgba(11,12,15,0.05), 0 12px 32px -20px rgba(11,12,15,0.18)",
     },
 }
 _T = _AR_TOKENS[_AR_THEME]
@@ -2943,29 +2944,44 @@ else:
 _banner_col, _theme_col, _refresh_col = st.columns([5, 1, 1])
 
 with _banner_col:
+    if _AR_THEME == "light":
+        # Spyne.ai light look: clean white bar, near-black text, soft border
+        _hdr_bg     = "background:#ffffff;border:1px solid #ececf1;"
+        _hdr_shadow = "box-shadow:0 1px 2px rgba(11,12,15,0.05),0 12px 32px -22px rgba(11,12,15,0.25);"
+        _logo_pill  = "background:#f7f8fa;border:1px solid #ececf1;"
+        _title_col  = "#0b0c0f"
+        _meta_col   = "#5b6472"
+        _uchip      = "background:#f3f4f7;color:#0b0c0f;border:1px solid #ececf1;"
+        _rchip      = "background:rgba(245,158,11,0.14);color:#b45309;"
+    else:
+        _hdr_bg     = f'background:linear-gradient(120deg,{_T["head1"]} 0%,{_T["head2"]} 100%);'
+        _hdr_shadow = "box-shadow:0 8px 28px -12px rgba(0,0,0,0.45);"
+        _logo_pill  = "background:#fff;box-shadow:0 4px 14px rgba(0,0,0,0.18);"
+        _title_col  = "#ffffff"
+        _meta_col   = "rgba(255,255,255,0.7)"
+        _uchip      = "background:rgba(255,255,255,0.14);color:#fff;"
+        _rchip      = "background:rgba(250,204,21,0.22);color:#fde68a;"
+
     st.markdown(
-        f'<div style="'
-        f'background:linear-gradient(120deg,{_T["head1"]} 0%,{_T["head2"]} 100%);'
+        f'<div style="{_hdr_bg}{_hdr_shadow}'
         f'border-radius:14px;'
-        f'box-shadow:0 8px 28px -12px rgba(0,0,0,0.45);'
         f'padding:14px 22px;display:flex;align-items:center;gap:16px;">'
         # Logo pill
-        f'<div style="background:#fff;border-radius:12px;padding:9px 14px;'
-        f'box-shadow:0 4px 14px rgba(0,0,0,0.18);flex-shrink:0;">'
+        f'<div style="{_logo_pill}border-radius:12px;padding:9px 14px;flex-shrink:0;">'
         f'<img src="{_logo_src}" style="height:24px;max-width:110px;'
         f'object-fit:contain;display:block;" /></div>'
         # Title + meta
         f'<div style="min-width:0;">'
-        f'<div style="font-family:\'Space Grotesk\',sans-serif;color:#fff;font-size:19px;'
+        f'<div style="font-family:\'Space Grotesk\',sans-serif;color:{_title_col};font-size:19px;'
         f'font-weight:600;letter-spacing:-0.01em;line-height:1.1;">'
         f'AR Collections Dashboard</div>'
-        f'<div style="color:rgba(255,255,255,0.7);font-size:12px;margin-top:5px;'
+        f'<div style="color:{_meta_col};font-size:12px;margin-top:5px;'
         f'display:flex;align-items:center;flex-wrap:wrap;gap:10px;">'
         f'<span>Finance Team &middot; Collections &middot; Aging &middot; Reminders</span>'
-        f'<span style="background:rgba(255,255,255,0.14);color:#fff;'
+        f'<span style="{_uchip}'
         f'border-radius:999px;padding:3px 9px;font-size:11.5px;font-weight:600;white-space:nowrap;">'
         f'{_uname_display}</span>'
-        f'<span style="background:rgba(250,204,21,0.22);color:#fde68a;'
+        f'<span style="{_rchip}'
         f'border-radius:999px;'
         f'padding:3px 9px;font-size:11px;font-weight:700;white-space:nowrap;">'
         f'{_role_label}</span>'
