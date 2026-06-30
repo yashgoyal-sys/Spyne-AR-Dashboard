@@ -2237,19 +2237,21 @@ def _themed_table(df, fmt_map=None, col_color=None, height=520):
     body = "".join(body_rows)
 
     st.markdown(
-        f"""<style>
-        .ar-tbl-wrap {{ max-height:{height}px; overflow:auto; border:1px solid var(--ar-border);
-            border-radius:14px; box-shadow:var(--ar-shadow); background:var(--ar-panel); }}
-        .ar-tbl {{ width:100%; border-collapse:collapse; font-family:'Manrope',sans-serif; }}
-        .ar-tbl th {{ position:sticky; top:0; background:var(--ar-panel2); color:var(--ar-faint);
-            font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em;
-            padding:12px 16px; border-bottom:1px solid var(--ar-border); white-space:nowrap; z-index:1; }}
-        .ar-tbl td {{ padding:11px 16px; font-size:13.5px; color:var(--ar-text);
-            border-bottom:1px solid var(--ar-border); white-space:nowrap; }}
-        .ar-tbl tbody tr:hover {{ background:var(--ar-hover); }}
-        </style>
-        <div class="ar-tbl-wrap"><table class="ar-tbl">
-        <thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></div>""",
+        (
+"<style>"
+".ar-tbl-wrap{max-height:" + str(height) + "px;overflow:auto;border:1px solid var(--ar-border);"
+"border-radius:14px;box-shadow:var(--ar-shadow);background:var(--ar-panel);}"
+".ar-tbl{width:100%;border-collapse:collapse;font-family:'Manrope',sans-serif;}"
+".ar-tbl th{position:sticky;top:0;background:var(--ar-panel2);color:var(--ar-faint);"
+"font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;"
+"padding:12px 16px;border-bottom:1px solid var(--ar-border);white-space:nowrap;z-index:1;}"
+".ar-tbl td{padding:11px 16px;font-size:13.5px;color:var(--ar-text);"
+"border-bottom:1px solid var(--ar-border);white-space:nowrap;}"
+".ar-tbl tbody tr:hover{background:var(--ar-hover);}"
+"</style>"
+'<div class="ar-tbl-wrap"><table class="ar-tbl">'
+"<thead><tr>" + head + "</tr></thead><tbody>" + body + "</tbody></table></div>"
+        ),
         unsafe_allow_html=True,
     )
 
