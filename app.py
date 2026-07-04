@@ -965,9 +965,9 @@ CURR_SYM = {"INR":"₹","USD":"$","EUR":"€","GBP":"£","AUD":"A$","CAD":"C$",
             "NZD":"NZ$","SGD":"S$","HKD":"HK$","NOK":"kr ","SEK":"kr ","DKK":"kr "}
 
 TEMPLATES = {
-    "Final Reminder":        "final",
-    "Urgent Reminder":       "urgent",
     "Friendly Reminder":     "friendly",
+    "Urgent Reminder":       "urgent",
+    "Final Reminder":        "final",
     "Subscription Invoice":  "subscription",
 }
 
