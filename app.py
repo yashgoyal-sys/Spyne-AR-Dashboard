@@ -2876,11 +2876,25 @@ div[data-testid="stButton"] button[kind="secondary"] {{
     color: var(--ar-text) !important;
     border-radius: 10px !important; font-weight: 600 !important;
 }}
-div[data-testid="stButton"] button[kind="primary"] {{
-    background: var(--ar-accent) !important; color: #fff !important;
+div[data-testid="stButton"] button[kind="primary"],
+div[data-testid="stButton"] button[data-testid="stBaseButton-primary"],
+[data-testid="stFormSubmitButton"] button[kind="primary"],
+[data-testid="stFormSubmitButton"] button[data-testid="stBaseButton-primaryFormSubmit"] {{
+    background: var(--ar-accent) !important;
     border: none !important; border-radius: 10px !important; font-weight: 700 !important;
 }}
-div[data-testid="stButton"] button[kind="primary"]:hover {{ filter: brightness(0.93); }}
+div[data-testid="stButton"] button[kind="primary"] *,
+div[data-testid="stButton"] button[data-testid="stBaseButton-primary"] *,
+[data-testid="stFormSubmitButton"] button[kind="primary"] *,
+[data-testid="stFormSubmitButton"] button[data-testid="stBaseButton-primaryFormSubmit"] *,
+div[data-testid="stButton"] button[kind="primary"] p,
+[data-testid="stFormSubmitButton"] button[kind="primary"] p {{
+    color: #ffffff !important;
+}}
+div[data-testid="stButton"] button[kind="primary"]:hover {{ filter: brightness(1.15); }}
+div[data-testid="stButton"] button[kind="primary"]:disabled,
+[data-testid="stFormSubmitButton"] button[kind="primary"]:disabled {{ opacity: 0.55 !important; }}
+div[data-testid="stButton"] button[kind="primary"]:disabled * {{ color: #ffffff !important; }}
 
 /* ── RAG inline badges ──────────────────────────────────────────────────── */
 .rag-red   {{ color: #e5484d; font-weight: 700; }}
