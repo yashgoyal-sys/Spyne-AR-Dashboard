@@ -1708,6 +1708,25 @@ _SENTLOG_TAB      = "Sent Log"
 _SENTLOG_HEADERS  = ["sent_at", "invoice_no", "customer", "to_email",
                      "cc_emails", "subject", "status", "error", "template"]
 
+def _normalize_private_key(pk: str) -> str:
+    """Rebuild a valid PEM private key from a secret that may have had its
+    line breaks turned into literal '\\n', '\\r\\n', or plain spaces."""
+    if not pk:
+        return pk
+    pk = pk.strip()
+    # strip accidental wrapping quotes
+    if len(pk) >= 2 and pk[0] in "\"'" and pk[-1] == pk[0]:
+        pk = pk[1:-1]
+    pk = pk.replace("\\r", "").replace("\\n", "\n").replace("\r", "")
+    m = re.search(r"-----BEGIN ([A-Z0-9 ]+?)-----(.*?)-----END \1-----", pk, re.S)
+    if m:
+        label = m.group(1).strip()
+        body  = re.sub(r"\s+", "", m.group(2))          # strip ALL whitespace from body
+        lines = [body[i:i+64] for i in range(0, len(body), 64)]
+        pk = f"-----BEGIN {label}-----\n" + "\n".join(lines) + f"\n-----END {label}-----\n"
+    return pk
+
+
 def _sentlog_ws():
     """Return the gspread worksheet for the Sent Log tab, or None if not configured."""
     try:
@@ -1717,9 +1736,8 @@ def _sentlog_ws():
             return None
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
         _sa = dict(st.secrets["gcp_service_account"])
-        # Normalise escaped newlines in the private key (common Streamlit-secrets issue)
         if _sa.get("private_key"):
-            _sa["private_key"] = _sa["private_key"].replace("\\n", "\n")
+            _sa["private_key"] = _normalize_private_key(_sa["private_key"])
         creds = Credentials.from_service_account_info(_sa, scopes=scopes)
         gc = gspread.authorize(creds)
         sheet_id, _ = parse_gsheet_url(_FIXED_SHEET_URL)
@@ -4813,8 +4831,17 @@ if tab_email is not None:
                             st.error(f"❌ Secret is missing keys: {_missing}")
                             st.stop()
                         st.caption(f"Service account: `{_sa.get('client_email')}`")
-                        if _sa.get("private_key"):
-                            _sa["private_key"] = _sa["private_key"].replace("\\n", "\n")
+                        _pk_raw = _sa.get("private_key", "")
+                        _sa["private_key"] = _normalize_private_key(_pk_raw)
+                        _pk = _sa["private_key"]
+                        st.caption(
+                            f"Key diagnostics — length: {len(_pk)} · "
+                            f"has BEGIN: {'-----BEGIN' in _pk} · has END: {'-----END' in _pk} · "
+                            f"newlines: {_pk.count(chr(10))}")
+                        if "-----BEGIN" not in _pk or "-----END" not in _pk:
+                            st.error("❌ The private_key value is incomplete (no BEGIN/END markers). "
+                                     "Re-paste it into secrets — see the format tip below.")
+                            st.stop()
                         _creds = Credentials.from_service_account_info(
                             _sa, scopes=["https://www.googleapis.com/auth/spreadsheets"])
                         _gc = gspread.authorize(_creds)
