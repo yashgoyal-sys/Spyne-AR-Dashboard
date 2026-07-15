@@ -982,7 +982,7 @@ ZOHO_DC_MAP = {
 }
 
 # ── Shared invoice table builder ───────────────────────────────────────────────
-def _invoice_table_html(invoices_df: pd.DataFrame) -> str:
+def _invoice_table_html(invoices_df: pd.DataFrame, include_aging: bool = False) -> str:
 
     def _clean(val, fallback="—"):
         """Return a display-safe string; replace blank/NaN/NaT with fallback."""
@@ -1014,6 +1014,16 @@ def _invoice_table_html(invoices_df: pd.DataFrame) -> str:
         else:
             pay_cell = '<span style="color:#000000;font-size:12px;">—</span>'
 
+        aging_cell = ""
+        if include_aging:
+            _ag = r.get("Aging", "")
+            try:
+                _ag_txt = f"{int(float(_ag))} days"
+            except Exception:
+                _ag_txt = "—"
+            aging_cell = (f'<td style="padding:9px 12px;font-size:13px;color:#b91c1c;'
+                          f'font-weight:700;border-bottom:1px solid #e2e8f0;">{_ag_txt}</td>')
+
         rows += f"""
         <tr style="background:{bg};">
           <td style="padding:9px 12px;font-size:13px;color:#000000;border-bottom:1px solid #e2e8f0;">{_clean(r.get("invoice_number",""))}</td>
@@ -1021,6 +1031,7 @@ def _invoice_table_html(invoices_df: pd.DataFrame) -> str:
           <td style="padding:9px 12px;font-size:13px;color:#000000;border-bottom:1px solid #e2e8f0;">{currency}</td>
           <td style="padding:9px 12px;font-size:13px;color:#000000;border-bottom:1px solid #e2e8f0;font-weight:600;">{fmt_amount(amount, currency)}</td>
           <td style="padding:9px 12px;font-size:13px;border-bottom:1px solid #e2e8f0;{bal_style}">{fmt_amount(balance, currency)}</td>
+          {aging_cell}
           <td style="padding:9px 12px;font-size:13px;color:#000000;border-bottom:1px solid #e2e8f0;">{svc_s}</td>
           <td style="padding:9px 12px;font-size:13px;color:#000000;border-bottom:1px solid #e2e8f0;">{svc_e}</td>
           <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;text-align:center;">{pay_cell}</td>
@@ -1045,19 +1056,25 @@ def _invoice_table_html(invoices_df: pd.DataFrame) -> str:
         total_usd = invoices_df["Final USD"].sum() if "Final USD" in invoices_df.columns else 0
         total_str = fmt_amount(total_usd, "USD")
 
+    # columns after the Outstanding Balance cell (for total-row colspan)
+    _rest_cols = (1 if include_aging else 0) + 3   # [Aging?] + SvcStart + SvcEnd + Payment
     rows += f"""
         <tr style="background:#f1f5f9;">
           <td colspan="4" style="padding:10px 12px;font-size:13px;font-weight:700;color:#000000;">Total Outstanding</td>
-          <td colspan="4" style="padding:10px 12px;font-size:13px;font-weight:700;color:#000000;">{total_str}</td>
+          <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#000000;">{total_str}</td>
+          <td colspan="{_rest_cols}" style="border-bottom:0;"></td>
         </tr>"""
 
-    header = """
+    _aging_th = ('<th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;'
+                 'text-transform:uppercase;font-weight:600;">Aging (days)</th>') if include_aging else ""
+    header = f"""
       <tr style="background:#1a1a2e;">
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Invoice No.</th>
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Invoice Date</th>
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Currency</th>
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Invoice Amount</th>
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Outstanding Balance</th>
+        {_aging_th}
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Service Start</th>
         <th style="padding:10px 12px;text-align:left;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Service End</th>
         <th style="padding:10px 12px;text-align:center;font-size:12px;color:#ffffff;text-transform:uppercase;font-weight:600;">Payment</th>
@@ -1126,7 +1143,8 @@ def build_email(template_key: str, customer: str, invoices_df: pd.DataFrame,
     """
     n         = len(invoices_df)
     max_aging = int(invoices_df["Aging"].max()) if "Aging" in invoices_df.columns else 0
-    inv_table = _invoice_table_html(invoices_df)
+    # Urgent & Final reminders show per-invoice aging in the table
+    inv_table = _invoice_table_html(invoices_df, include_aging=template_key in ("urgent", "final"))
 
     # Build total string from outstanding balance (same as the table Total row)
     if "balance" in invoices_df.columns and "currency_code" in invoices_df.columns:
@@ -4160,10 +4178,12 @@ if tab_email is not None:
         # only "Subscription Invoice" may be sent to them.
         _autopay_set   = load_autopay_customers()
         _block_autopay = template_key in ("friendly", "urgent", "final")
+        def _is_autopay(name) -> bool:
+            return _norm_name(name) in _autopay_set
         if _block_autopay and _autopay_set:
-            st.caption("🔒 Auto-Pay customers are excluded from this template — "
-                       "Friendly / Urgent / Final reminders can't be sent to them. "
-                       "Switch to **Subscription Invoice** to email them.")
+            st.caption("🔒 Auto-Pay customers stay visible in the list, but collection "
+                       "reminders (Friendly / Urgent / Final) are **skipped at send** for them. "
+                       "Use **Subscription Invoice** to email them.")
 
         with cfg2:
             st.markdown("**Recipients**")
@@ -4237,12 +4257,6 @@ if tab_email is not None:
                 cf = cf[cf["Current Invoice Status"].isin(c_inv_status)]
             if "email" in cf.columns:
                 cf = cf[cf["email"].notna() & (cf["email"].str.strip() != "")]
-            if _block_autopay and _autopay_set and "customer_name" in cf.columns:
-                _ap_mask = cf["customer_name"].map(lambda n: _norm_name(n) in _autopay_set)
-                _n_ap = cf.loc[_ap_mask, "customer_name"].nunique()
-                cf = cf[~_ap_mask]
-                if _n_ap:
-                    st.info(f"🔒 {_n_ap} Auto-Pay customer(s) hidden for this template.")
 
             if "customer_name" in cf.columns:
                 # Only include columns that actually exist in cf
@@ -4438,9 +4452,16 @@ if tab_email is not None:
                                 st.warning(f"Payment links fetch failed: {pl_err}")
 
                     prog = st.progress(0, text="Sending…")
-                    ok, fail, results = 0, 0, []
+                    ok, fail, skipped_ap, results = 0, 0, 0, []
                     for idx, (_, crow) in enumerate(cust_to_send.iterrows()):
                         cname        = crow["customer_name"]
+                        # Auto-Pay customers: collection reminders are not sent to them
+                        if _block_autopay and _is_autopay(cname):
+                            skipped_ap += 1
+                            results.append({"Customer": cname,
+                                            "Status": "🔒 Skipped — Auto-Pay (collection reminder blocked)"})
+                            prog.progress((idx+1)/len(cust_to_send), text=f"Sent {idx+1} of {len(cust_to_send)}…")
+                            continue
                         to_email     = str(crow.get("Email","")).strip() if send_to_customer else None
                         csm_email    = str(crow.get("CSM_Email", crow.get("CSM",""))).strip()
                         customer_cc  = str(crow.get("Customer_CC", "")).strip()
@@ -4502,6 +4523,8 @@ if tab_email is not None:
                         prog.progress((idx+1)/len(cust_to_send), text=f"Sent {idx+1} of {len(cust_to_send)}…")
                     prog.empty()
                     if ok:   st.success(f"✅ {ok} reminder(s) sent.")
+                    if skipped_ap: st.warning(f"🔒 {skipped_ap} Auto-Pay customer(s) skipped — "
+                                              f"collection reminders are not sent to them.")
                     if fail: st.error(f"❌ {fail} failed.")
                     _themed_table(pd.DataFrame(results), height=320)
             else:
@@ -4527,12 +4550,6 @@ if tab_email is not None:
             if e_bkt: ef = ef[ef["Bucket"].isin(e_bkt)]
             if "email" in ef.columns:
                 ef = ef[ef["email"].notna() & (ef["email"].str.strip() != "")]
-            if _block_autopay and _autopay_set and "customer_name" in ef.columns:
-                _ap_mask_i = ef["customer_name"].map(lambda n: _norm_name(n) in _autopay_set)
-                _n_ap_i = ef.loc[_ap_mask_i, "customer_name"].nunique()
-                ef = ef[~_ap_mask_i]
-                if _n_ap_i:
-                    st.info(f"🔒 {_n_ap_i} Auto-Pay customer(s) hidden for this template.")
 
             st.caption(f"{len(ef):,} invoices with valid email addresses")
 
@@ -4711,9 +4728,16 @@ if tab_email is not None:
                 _recent_sent = recently_sent_invoices(24) if skip_recent else set()
 
                 progress = st.progress(0, text="Sending…")
-                ok2, fail2, skip2, results2 = 0, 0, 0, []
+                ok2, fail2, skip2, skipped_ap2, results2 = 0, 0, 0, 0, []
 
                 for idx, (customer, rows) in enumerate(_cust_groups.items()):
+                    # Auto-Pay customers: collection reminders are not sent to them
+                    if _block_autopay and _is_autopay(customer):
+                        skipped_ap2 += 1
+                        results2.append({"Customer": customer,
+                                         "Status": "🔒 Skipped — Auto-Pay (collection reminder blocked)"})
+                        progress.progress((idx+1)/len(_cust_groups))
+                        continue
                     # de-dupe numbers, preserve order
                     inv_nos = list(dict.fromkeys(
                         str(r.get("invoice_number","")).strip() for r in rows))
@@ -4803,6 +4827,8 @@ if tab_email is not None:
                 progress.empty()
                 if ok2:   st.success(f"✅ {ok2} email(s) sent to {ok2} customer(s).")
                 if skip2: st.info(f"⏭ {skip2} invoice(s) skipped — already sent in last 24h.")
+                if skipped_ap2: st.warning(f"🔒 {skipped_ap2} Auto-Pay customer(s) skipped — "
+                                           f"collection reminders are not sent to them.")
                 if fail2: st.error(f"❌ {fail2} failed.")
                 _themed_table(pd.DataFrame(results2), height=320)
 
