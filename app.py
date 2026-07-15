@@ -1703,9 +1703,56 @@ def init_db():
         """)
 
 
+# ── Persistent Sent Log on Google Sheet (survives redeploys / re-login) ────────
+_SENTLOG_TAB      = "Sent Log"
+_SENTLOG_HEADERS  = ["sent_at", "invoice_no", "customer", "to_email",
+                     "cc_emails", "subject", "status", "error", "template"]
+
+def _sentlog_ws():
+    """Return the gspread worksheet for the Sent Log tab, or None if not configured."""
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+        if "gcp_service_account" not in st.secrets:
+            return None
+        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+        creds = Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]), scopes=scopes)
+        gc = gspread.authorize(creds)
+        sheet_id, _ = parse_gsheet_url(_FIXED_SHEET_URL)
+        sh = gc.open_by_key(sheet_id)
+        try:
+            ws = sh.worksheet(_SENTLOG_TAB)
+        except Exception:
+            ws = sh.add_worksheet(title=_SENTLOG_TAB, rows=1000, cols=len(_SENTLOG_HEADERS))
+            ws.append_row(_SENTLOG_HEADERS, value_input_option="RAW")
+        # Ensure header row exists
+        if not ws.row_values(1):
+            ws.append_row(_SENTLOG_HEADERS, value_input_option="RAW")
+        return ws
+    except Exception:
+        return None
+
+def _sentlog_sheet_df() -> pd.DataFrame:
+    """Read all Sent Log rows from the Google Sheet. Empty DataFrame if unavailable."""
+    ws = _sentlog_ws()
+    if ws is None:
+        return pd.DataFrame(columns=_SENTLOG_HEADERS)
+    try:
+        records = ws.get_all_records(expected_headers=_SENTLOG_HEADERS)
+        df = pd.DataFrame(records)
+        for c in _SENTLOG_HEADERS:
+            if c not in df.columns:
+                df[c] = ""
+        return df
+    except Exception:
+        return pd.DataFrame(columns=_SENTLOG_HEADERS)
+
+
 def log_email(invoice_nos, customer, to_email, cc_emails, subject, status,
               error="", template=""):
     """Log one row per invoice_no so reminder counts work correctly.
+    Writes to the local DB (fast cache) AND the Google Sheet (durable store).
     invoice_nos can be a single string or a list of strings.
     """
     from datetime import timezone, timedelta
@@ -1714,29 +1761,53 @@ def log_email(invoice_nos, customer, to_email, cc_emails, subject, status,
 
     if isinstance(invoice_nos, str):
         invoice_nos = [invoice_nos]
+    invoice_nos = [str(i).strip() for i in invoice_nos]
+
+    # 1) Local DB
     with sqlite3.connect(DB_PATH) as conn:
         for inv_no in invoice_nos:
             conn.execute("""
                 INSERT INTO sent_emails
                     (invoice_no, customer, to_email, cc_emails, subject, sent_at, status, error, template)
                 VALUES (?,?,?,?,?,?,?,?,?)
-            """, (str(inv_no).strip(), customer, to_email, cc_emails, subject,
+            """, (inv_no, customer, to_email, cc_emails, subject,
                   sent_at, status, error, template))
+
+    # 2) Google Sheet (durable) — best-effort, never blocks the send
+    ws = _sentlog_ws()
+    if ws is not None:
+        try:
+            ws.append_rows(
+                [[sent_at, inv_no, customer, to_email, cc_emails,
+                  subject, status, error, template] for inv_no in invoice_nos],
+                value_input_option="RAW",
+            )
+        except Exception:
+            pass
 
 
 def get_sent_log():
+    """Prefer the durable Google Sheet; fall back to local DB."""
+    sdf = _sentlog_sheet_df()
+    if not sdf.empty:
+        return sdf.sort_values("sent_at", ascending=False).reset_index(drop=True)
     with sqlite3.connect(DB_PATH) as conn:
-        return pd.read_sql(
-            "SELECT * FROM sent_emails ORDER BY sent_at DESC", conn
-        )
+        return pd.read_sql("SELECT * FROM sent_emails ORDER BY sent_at DESC", conn)
 
 
 def recently_sent_invoices(within_hours: int = 24) -> set:
     """Invoice numbers successfully emailed within the last `within_hours`.
-    sent_at is stored as an IST isoformat string, so lexical >= works."""
+    Uses the durable sheet if available, else the local DB. sent_at is an
+    IST isoformat string, so lexical >= comparison works."""
     from datetime import timezone, timedelta
     _IST = timezone(timedelta(hours=5, minutes=30))
     cutoff = (datetime.now(_IST) - timedelta(hours=within_hours)).isoformat()
+
+    sdf = _sentlog_sheet_df()
+    if not sdf.empty:
+        m = (sdf["status"] == "sent") & (sdf["sent_at"].astype(str) >= cutoff)
+        return {str(v).strip() for v in sdf.loc[m, "invoice_no"]}
+
     with sqlite3.connect(DB_PATH) as conn:
         rows = conn.execute(
             "SELECT DISTINCT invoice_no FROM sent_emails "
@@ -1747,11 +1818,16 @@ def recently_sent_invoices(within_hours: int = 24) -> set:
 
 def get_reminder_counts() -> dict:
     """Return {invoice_no: sent_count} for all successfully sent emails."""
+    sdf = _sentlog_sheet_df()
+    if not sdf.empty:
+        sent = sdf[sdf["status"] == "sent"]
+        if sent.empty:
+            return {}
+        return sent.groupby("invoice_no").size().to_dict()
     with sqlite3.connect(DB_PATH) as conn:
         df = pd.read_sql(
             "SELECT invoice_no, COUNT(*) as cnt FROM sent_emails "
-            "WHERE status='sent' GROUP BY invoice_no",
-            conn,
+            "WHERE status='sent' GROUP BY invoice_no", conn,
         )
     if df.empty:
         return {}
@@ -4714,6 +4790,39 @@ if tab_email is not None:
         # ═══════════════════════════════════════════════════════════════════════════
         with et3:
             st.subheader("📋 Sent Email Log")
+
+            # ── Google-Sheet persistence status + self-test ───────────────────
+            _sl_c1, _sl_c2 = st.columns([1, 2])
+            with _sl_c1:
+                if st.button("🧪 Test Sheet Storage", use_container_width=True):
+                    _ws = _sentlog_ws()
+                    if _ws is None:
+                        st.error("❌ Not connected. Check the `[gcp_service_account]` secret "
+                                 "and that the sheet is shared with the service account as Editor.")
+                    else:
+                        try:
+                            from datetime import timezone, timedelta
+                            _IST = timezone(timedelta(hours=5, minutes=30))
+                            _stamp = datetime.now(_IST).isoformat()
+                            _ws.append_row(
+                                [_stamp, "TEST-CONNECTION", "Self-test", "-", "-",
+                                 "Sent-log connectivity test", "test", "", "-"],
+                                value_input_option="RAW")
+                            _n = len(_ws.get_all_values()) - 1
+                            st.success(f"✅ Connected & wrote a test row to the **Sent Log** tab. "
+                                       f"Sheet now has {_n} row(s). You can delete the TEST-CONNECTION row.")
+                        except Exception as _e:
+                            st.error(f"❌ Connected but write failed: {_e}")
+            with _sl_c2:
+                _persist_on = "gcp_service_account" in st.secrets
+                st.caption(
+                    ("🟢 **Persistent storage active** — the log is saved to the "
+                     "**Sent Log** tab in your Google Sheet and survives re-login/redeploys.")
+                    if _persist_on else
+                    ("🟡 **Local only** — `[gcp_service_account]` secret not detected, so the "
+                     "log is stored on the server and resets on redeploy. Add the secret to persist.")
+                )
+
             log_df = get_sent_log()
             if not log_df.empty:
                 # ── Format sent_at as readable IST string ──────────────────────────
