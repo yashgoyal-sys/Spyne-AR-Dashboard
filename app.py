@@ -2684,6 +2684,8 @@ _PRODUCT_CLASS_MAP = {
     "Pro Quarterly": "Studio", "Pro Yearly": "Studio",
     "Spyne - Touch": "Studio", "Spyne Touch": "Studio",
     "Spyne Touch - Over-Usage": "Studio", "Spyne Touch - Overusages": "Studio",
+    "Smart Match": "Studio", "Smart Campaign": "Studio", "Smart Watch": "Studio",
+    "Lite Monthly": "Studio",
     "Inbound Sales Quarterly": "Vini", "Inbound Sales Yearly": "Vini",
     "Inbound Service Quarterly": "Vini", "Inbound Service Yearly": "Vini",
     "Outbound Sales Quarterly": "Vini", "Outbound Service Quarterly": "Vini",
