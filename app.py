@@ -3722,16 +3722,14 @@ if tab_overview is not None:
                 if not _pos.empty:
                     st.metric("Product-Level Outstanding (INR, converted)",
                               fmt_inr(_pos["O/S INR"].sum()))
-                    _top = (_pos.groupby("item_name")["O/S INR"].sum()
-                            .reset_index()
-                            .sort_values("O/S INR", ascending=False)
-                            .head(10))
-                    fig = px.bar(_top, x="O/S INR", y="item_name",
-                                 orientation="h",
-                                 title="Top 10 Products by Outstanding (INR)",
-                                 text_auto=",.0f")
-                    fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="",
-                                      xaxis_title="Outstanding (INR)")
+                    _CLASS_COLORS_OV = {"Studio": "#3b82f6", "Vini": "#a855f7", "Unidentified": "#f59e0b"}
+                    _cls = (_pos.groupby("Product Class")["O/S INR"].sum()
+                            .reset_index().sort_values("O/S INR", ascending=False))
+                    fig = px.bar(_cls, x="Product Class", y="O/S INR",
+                                 color="Product Class", color_discrete_map=_CLASS_COLORS_OV,
+                                 title="Outstanding by Product Class (INR)", text_auto=",.0f")
+                    fig.update_layout(showlegend=False, xaxis_title="",
+                                      yaxis_title="Outstanding (INR)")
                     st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
                 else:
                     st.caption("No product-level outstanding to display.")
