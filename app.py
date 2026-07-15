@@ -2675,7 +2675,7 @@ def load_autopay_customers() -> set:
 
 # ── Product-level sheet (line items) + Studio/Vini classification ─────────────
 _PRODUCT_SHEET_ID = "1y2Xs0HsJtwO4DRkUoWA7a_2KP-ygXXTO4iue6looDws"
-_PRODUCT_GID      = "127201515"
+_PRODUCT_TAB      = "Combined Invoices"   # merged India + US line items
 
 # item_name → Studio / Vini  (per the Product Classification mapping)
 _PRODUCT_CLASS_MAP = {
@@ -2710,8 +2710,15 @@ def load_product_sheet() -> pd.DataFrame:
     compute aging + per-line RAG. Empty DataFrame on failure."""
     try:
         url = (f"https://docs.google.com/spreadsheets/d/{_PRODUCT_SHEET_ID}"
-               f"/export?format=csv&gid={_PRODUCT_GID}")
-        df = pd.read_csv(BytesIO(requests.get(url, timeout=25).content))
+               f"/export?format=xlsx")
+        _xl = pd.ExcelFile(BytesIO(requests.get(url, timeout=40).content))
+        # Prefer the "Combined Invoices" tab; else the best line-item-looking sheet
+        _tab = next((s for s in _xl.sheet_names
+                     if s.strip().lower() == _PRODUCT_TAB.lower()), None)
+        if _tab is None:
+            _tab = next((s for s in _xl.sheet_names if "combined" in s.lower()),
+                        _xl.sheet_names[0])
+        df = _xl.parse(_tab)
     except Exception:
         return pd.DataFrame()
     if df.empty:
