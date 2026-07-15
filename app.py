@@ -2514,6 +2514,30 @@ def fetch_gsheet(url: str) -> bytes:
     return resp.content
 
 
+# ── "Customer on Auto Pay" list ───────────────────────────────────────────────
+# These customers are on auto-pay: collection follow-ups (Friendly/Urgent/Final)
+# must NOT be sent to them — only the New Subscription Invoice is allowed.
+_AUTOPAY_GID = "1269137990"
+
+def _norm_name(s) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(s).lower()).strip()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_autopay_customers() -> set:
+    """Return a set of normalized customer names on Auto Pay (from the dedicated sheet tab)."""
+    try:
+        sheet_id, _ = parse_gsheet_url(_FIXED_SHEET_URL)
+        url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+               f"/export?format=csv&gid={_AUTOPAY_GID}")
+        df = pd.read_csv(BytesIO(requests.get(url, timeout=20).content))
+        name_col = next((c for c in df.columns if "customer" in c.lower() and "name" in c.lower()), None)
+        if name_col is None:
+            name_col = next((c for c in df.columns if "name" in c.lower()), df.columns[-1])
+        return {_norm_name(v) for v in df[name_col].dropna() if _norm_name(v)}
+    except Exception:
+        return set()
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_gsheet_private(url: str, creds_json: str) -> bytes:
     """Download a private Google Sheet using a service-account JSON string. Cached 2 min."""
@@ -4015,6 +4039,15 @@ if tab_email is not None:
             )
             template_key = TEMPLATES[selected_template]
 
+        # Auto-Pay customers: collection follow-ups (Friendly/Urgent/Final) are blocked;
+        # only "Subscription Invoice" may be sent to them.
+        _autopay_set   = load_autopay_customers()
+        _block_autopay = template_key in ("friendly", "urgent", "final")
+        if _block_autopay and _autopay_set:
+            st.caption("🔒 Auto-Pay customers are excluded from this template — "
+                       "Friendly / Urgent / Final reminders can't be sent to them. "
+                       "Switch to **Subscription Invoice** to email them.")
+
         with cfg2:
             st.markdown("**Recipients**")
             rc1, rc2, rc3, rc4 = st.columns(4)
@@ -4087,6 +4120,12 @@ if tab_email is not None:
                 cf = cf[cf["Current Invoice Status"].isin(c_inv_status)]
             if "email" in cf.columns:
                 cf = cf[cf["email"].notna() & (cf["email"].str.strip() != "")]
+            if _block_autopay and _autopay_set and "customer_name" in cf.columns:
+                _ap_mask = cf["customer_name"].map(lambda n: _norm_name(n) in _autopay_set)
+                _n_ap = cf.loc[_ap_mask, "customer_name"].nunique()
+                cf = cf[~_ap_mask]
+                if _n_ap:
+                    st.info(f"🔒 {_n_ap} Auto-Pay customer(s) hidden for this template.")
 
             if "customer_name" in cf.columns:
                 # Only include columns that actually exist in cf
@@ -4371,6 +4410,12 @@ if tab_email is not None:
             if e_bkt: ef = ef[ef["Bucket"].isin(e_bkt)]
             if "email" in ef.columns:
                 ef = ef[ef["email"].notna() & (ef["email"].str.strip() != "")]
+            if _block_autopay and _autopay_set and "customer_name" in ef.columns:
+                _ap_mask_i = ef["customer_name"].map(lambda n: _norm_name(n) in _autopay_set)
+                _n_ap_i = ef.loc[_ap_mask_i, "customer_name"].nunique()
+                ef = ef[~_ap_mask_i]
+                if _n_ap_i:
+                    st.info(f"🔒 {_n_ap_i} Auto-Pay customer(s) hidden for this template.")
 
             st.caption(f"{len(ef):,} invoices with valid email addresses")
 
