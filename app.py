@@ -4795,24 +4795,49 @@ if tab_email is not None:
             _sl_c1, _sl_c2 = st.columns([1, 2])
             with _sl_c1:
                 if st.button("🧪 Test Sheet Storage", use_container_width=True):
-                    _ws = _sentlog_ws()
-                    if _ws is None:
-                        st.error("❌ Not connected. Check the `[gcp_service_account]` secret "
-                                 "and that the sheet is shared with the service account as Editor.")
-                    else:
+                    # Step-by-step so the exact failure point is visible
+                    try:
+                        import gspread
+                        from google.oauth2.service_account import Credentials
+                        if "gcp_service_account" not in st.secrets:
+                            st.error("❌ Secret `[gcp_service_account]` not found in Streamlit "
+                                     "secrets. Add it in App → Settings → Secrets.")
+                            st.stop()
+                        _sa = dict(st.secrets["gcp_service_account"])
+                        _missing = [k for k in ("client_email", "private_key", "token_uri")
+                                    if not _sa.get(k)]
+                        if _missing:
+                            st.error(f"❌ Secret is missing keys: {_missing}")
+                            st.stop()
+                        st.caption(f"Service account: `{_sa.get('client_email')}`")
+                        _creds = Credentials.from_service_account_info(
+                            _sa, scopes=["https://www.googleapis.com/auth/spreadsheets"])
+                        _gc = gspread.authorize(_creds)
+                        _sid, _ = parse_gsheet_url(_FIXED_SHEET_URL)
                         try:
-                            from datetime import timezone, timedelta
-                            _IST = timezone(timedelta(hours=5, minutes=30))
-                            _stamp = datetime.now(_IST).isoformat()
-                            _ws.append_row(
-                                [_stamp, "TEST-CONNECTION", "Self-test", "-", "-",
-                                 "Sent-log connectivity test", "test", "", "-"],
-                                value_input_option="RAW")
-                            _n = len(_ws.get_all_values()) - 1
-                            st.success(f"✅ Connected & wrote a test row to the **Sent Log** tab. "
-                                       f"Sheet now has {_n} row(s). You can delete the TEST-CONNECTION row.")
-                        except Exception as _e:
-                            st.error(f"❌ Connected but write failed: {_e}")
+                            _sh = _gc.open_by_key(_sid)
+                        except Exception as _oe:
+                            st.error(f"❌ Cannot open the spreadsheet. Most likely the sheet "
+                                     f"is **not shared** with `{_sa.get('client_email')}` as Editor, "
+                                     f"or the **Google Sheets/Drive API** is not enabled.\n\nDetails: {_oe}")
+                            st.stop()
+                        try:
+                            _ws = _sh.worksheet(_SENTLOG_TAB)
+                        except Exception:
+                            _ws = _sh.add_worksheet(title=_SENTLOG_TAB, rows=1000,
+                                                    cols=len(_SENTLOG_HEADERS))
+                            _ws.append_row(_SENTLOG_HEADERS, value_input_option="RAW")
+                        from datetime import timezone, timedelta
+                        _IST = timezone(timedelta(hours=5, minutes=30))
+                        _ws.append_row(
+                            [datetime.now(_IST).isoformat(), "TEST-CONNECTION", "Self-test",
+                             "-", "-", "Sent-log connectivity test", "test", "", "-"],
+                            value_input_option="RAW")
+                        _n = len(_ws.get_all_values()) - 1
+                        st.success(f"✅ Connected & wrote a test row to the **Sent Log** tab. "
+                                   f"Sheet now has {_n} row(s). Delete the TEST-CONNECTION row when done.")
+                    except Exception as _e:
+                        st.error(f"❌ {type(_e).__name__}: {_e}")
             with _sl_c2:
                 _persist_on = "gcp_service_account" in st.secrets
                 st.caption(
