@@ -2693,6 +2693,33 @@ _PRODUCT_CLASS_MAP = {
 }
 _PRODUCT_CLASS_NORM = {_norm_name(k): v for k, v in _PRODUCT_CLASS_MAP.items()}
 
+def derive_inr_rates(base_df) -> dict:
+    """Build {CURRENCY: INR-per-unit} from the base sheet, where each row has
+    `balance` (foreign-currency O/S) and `Outstanding` (its INR value)."""
+    rates = {"INR": 1.0}
+    try:
+        need = {"currency_code", "balance", "Outstanding"}
+        if base_df is None or not need <= set(base_df.columns):
+            return rates
+        d = base_df.copy()
+        d["_b"] = pd.to_numeric(d["balance"], errors="coerce")
+        d["_o"] = pd.to_numeric(d["Outstanding"], errors="coerce")
+        d = d[(d["_b"] > 0) & (d["_o"] > 0)]
+        if d.empty:
+            return rates
+        d["_r"] = d["_o"] / d["_b"]
+        for cur, grp in d.groupby("currency_code"):
+            rates[str(cur).upper().strip()] = float(grp["_r"].median())
+    except Exception:
+        pass
+    return rates
+
+def product_outstanding_inr(pdf: pd.DataFrame, rates: dict) -> pd.Series:
+    """Convert each product line's outstanding_amount to INR using base rates."""
+    cur = pdf["currency_code"].astype(str).str.upper().str.strip()
+    rate = cur.map(rates).fillna(0)   # unmapped currency → 0 (avoids NaN in totals)
+    return pd.to_numeric(pdf["outstanding_amount"], errors="coerce").fillna(0) * rate
+
 def classify_product(item_name: str, description: str = "") -> str:
     """Return 'Studio' | 'Vini' | 'Unidentified' for a line item."""
     key = _norm_name(item_name)
@@ -3437,6 +3464,9 @@ if _can("csm_filter") and "CSM" in df.columns:
 
 # Note: Invoice Status filtering is handled by the sidebar multiselect (default: overdue + sent)
 
+# ─── Currency → INR conversion rates (from base sheet) ────────────────────────
+_INR_RATES = derive_inr_rates(df)
+
 # ─── Column presence helpers ──────────────────────────────────────────────────
 def col(name):
     """Return df[name] if it exists, else an empty Series."""
@@ -3686,20 +3716,22 @@ if tab_overview is not None:
             _ov_pdf = load_product_sheet()
             if (_ov_pdf is not None and not _ov_pdf.empty
                     and "item_name" in _ov_pdf.columns and "outstanding_amount" in _ov_pdf.columns):
-                _pos = _ov_pdf[_ov_pdf["outstanding_amount"] > 0]
+                _ov_pdf = _ov_pdf.copy()
+                _ov_pdf["O/S INR"] = product_outstanding_inr(_ov_pdf, _INR_RATES)
+                _pos = _ov_pdf[_ov_pdf["O/S INR"] > 0]
                 if not _pos.empty:
-                    _cur = _pos.groupby("currency_code")["outstanding_amount"].sum().idxmax()
-                    _top = (_pos[_pos["currency_code"] == _cur]
-                            .groupby("item_name")["outstanding_amount"].sum()
+                    st.metric("Product-Level Outstanding (INR, converted)",
+                              fmt_inr(_pos["O/S INR"].sum()))
+                    _top = (_pos.groupby("item_name")["O/S INR"].sum()
                             .reset_index()
-                            .sort_values("outstanding_amount", ascending=False)
+                            .sort_values("O/S INR", ascending=False)
                             .head(10))
-                    fig = px.bar(_top, x="outstanding_amount", y="item_name",
+                    fig = px.bar(_top, x="O/S INR", y="item_name",
                                  orientation="h",
-                                 title=f"Top 10 Products by Outstanding ({_cur})",
+                                 title="Top 10 Products by Outstanding (INR)",
                                  text_auto=",.0f")
                     fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="",
-                                      xaxis_title=f"Outstanding ({_cur})")
+                                      xaxis_title="Outstanding (INR)")
                     st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
                 else:
                     st.caption("No product-level outstanding to display.")
@@ -5086,9 +5118,9 @@ if tab_email is not None:
 if tab_product is not None:
     with tab_product:
         st.markdown("Product-level outstanding & RAG, classified into "
-                    "**Studio** / **Vini** per the product mapping. "
-                    "Lines that match neither the item nor a description keyword are "
-                    "flagged **Unidentified**. Refreshes with the base data.")
+                    "**Studio** / **Vini** per the product mapping (anything not clearly "
+                    "Vini defaults to Studio). Outstanding is converted to **INR** using the "
+                    "base-sheet exchange rates. Refreshes with the base data.")
 
         pdf = load_product_sheet()
         if pdf is None or pdf.empty:
@@ -5096,17 +5128,20 @@ if tab_product is not None:
                     "sheet is shared as 'Anyone with the link can view'.")
         else:
             _CLASS_COLORS = {"Studio": "#3b82f6", "Vini": "#a855f7", "Unidentified": "#f59e0b"}
-            _n_lines = len(pdf)
-            _n_studio = int((pdf["Product Class"] == "Studio").sum())
-            _n_vini   = int((pdf["Product Class"] == "Vini").sum())
-            _n_unid   = int((pdf["Product Class"] == "Unidentified").sum())
+            pdf = pdf.copy()
+            pdf["O/S INR"] = product_outstanding_inr(pdf, _INR_RATES)
+
+            _n_lines   = len(pdf)
+            _os_total  = pdf["O/S INR"].sum()
+            _os_studio = pdf.loc[pdf["Product Class"] == "Studio", "O/S INR"].sum()
+            _os_vini   = pdf.loc[pdf["Product Class"] == "Vini",   "O/S INR"].sum()
 
             k = st.columns(4)
             for _c, (_lbl, _val, _clr) in zip(k, [
-                ("Line Items",   f"{_n_lines:,}",  "#38bdf8"),
-                ("Studio Lines", f"{_n_studio:,}", _CLASS_COLORS["Studio"]),
-                ("Vini Lines",   f"{_n_vini:,}",   _CLASS_COLORS["Vini"]),
-                ("Unidentified", f"{_n_unid:,}",   _CLASS_COLORS["Unidentified"]),
+                ("Product O/S (INR)", fmt_inr(_os_total),  "#38bdf8"),
+                ("Studio O/S (INR)",  fmt_inr(_os_studio), _CLASS_COLORS["Studio"]),
+                ("Vini O/S (INR)",    fmt_inr(_os_vini),   _CLASS_COLORS["Vini"]),
+                ("Line Items",        f"{_n_lines:,}",     "#1aa873"),
             ]):
                 _c.markdown(
                     f"<div class='kpi-card'>"
@@ -5114,24 +5149,35 @@ if tab_product is not None:
                     f"<div class='kpi-value' style='color:{_clr};'>{_val}</div></div>",
                     unsafe_allow_html=True)
 
-            if _n_unid:
-                st.warning(f"⚠️ {_n_unid} line(s) are **Unidentified** — review them below and "
-                           f"update the mapping so they classify correctly.")
-
+            st.caption("Outstanding converted to INR using the exchange rates implied by the base "
+                       "sheet (Outstanding ÷ balance per currency).")
             st.divider()
 
-            # ── Outstanding by Product Class (per currency — currencies are not mixed) ─
-            st.subheader("Outstanding by Product Class")
-            _g = (pdf.groupby(["Product Class", "currency_code"])
-                     .agg(Lines=("item_name", "count"),
-                          Outstanding=("outstanding_amount", "sum"))
-                     .reset_index())
-            _g = _g[_g["Outstanding"] != 0].sort_values(
-                ["Product Class", "Outstanding"], ascending=[True, False])
-            _g["Outstanding"] = _g.apply(
-                lambda r: fmt_amount(r["Outstanding"], r["currency_code"]), axis=1)
-            _g = _g.rename(columns={"currency_code": "Currency"})
-            _themed_table(_g, height=320)
+            # ── Outstanding by Product Class — INR (converted) + per-currency detail ──
+            st.subheader("Outstanding by Product Class (INR)")
+            _cls = (pdf.groupby("Product Class")
+                       .agg(Lines=("item_name", "count"), OS=("O/S INR", "sum"))
+                       .reset_index().sort_values("OS", ascending=False))
+            cpa, cpb = st.columns([1, 1])
+            with cpa:
+                fig_cls = px.pie(_cls, values="OS", names="Product Class", hole=0.55,
+                                 color="Product Class", color_discrete_map=_CLASS_COLORS,
+                                 title="Share of Outstanding (INR)")
+                st.plotly_chart(_fmt_fig(fig_cls), use_container_width=True, theme=None)
+            with cpb:
+                _cls_show = _cls.copy()
+                _cls_show["Outstanding (INR)"] = _cls_show["OS"].apply(fmt_inr)
+                _themed_table(_cls_show[["Product Class", "Lines", "Outstanding (INR)"]], height=200)
+                with st.expander("Per-currency breakdown"):
+                    _g = (pdf.groupby(["Product Class", "currency_code"])
+                             .agg(Lines=("item_name", "count"),
+                                  Outstanding=("outstanding_amount", "sum"))
+                             .reset_index())
+                    _g = _g[_g["Outstanding"] != 0].sort_values(
+                        ["Product Class", "Outstanding"], ascending=[True, False])
+                    _g["Outstanding"] = _g.apply(
+                        lambda r: fmt_amount(r["Outstanding"], r["currency_code"]), axis=1)
+                    _themed_table(_g.rename(columns={"currency_code": "Currency"}), height=280)
 
             # ── RAG on product level (line counts by class × RAG) ─────────────────
             st.subheader("RAG Status by Product Class")
@@ -5146,37 +5192,29 @@ if tab_product is not None:
             fig_pc.update_layout(legend_title="RAG", xaxis_title="", yaxis_title="Lines")
             st.plotly_chart(_fmt_fig(fig_pc), use_container_width=True, theme=None)
 
-            # ── Product-level outstanding table (by item_name) ────────────────────
-            st.subheader("Product-Level Outstanding")
+            # ── Product-level outstanding table (by item_name, in INR) ────────────
+            st.subheader("Product-Level Outstanding (INR)")
             _rag_rank = {"Green": 1, "Amber": 2, "Red": 3}
             _p = (pdf.assign(_r=pdf["RAG"].map(_rag_rank).fillna(1))
-                     .groupby(["item_name", "Product Class", "currency_code"])
+                     .groupby(["item_name", "Product Class"])
                      .agg(Lines=("item_name", "count"),
-                          Outstanding=("outstanding_amount", "sum"),
+                          OS=("O/S INR", "sum"),
                           Max_Aging=("Aging", "max"),
                           _worst=("_r", "max"))
                      .reset_index())
             _p["RAG"] = _p["_worst"].map({1: "Green", 2: "Amber", 3: "Red"})
-            _p = _p.sort_values("Outstanding", ascending=False)
-            _p["Outstanding"] = _p.apply(
-                lambda r: fmt_amount(r["Outstanding"], r["currency_code"]), axis=1)
-            _p = _p.rename(columns={"item_name": "Product", "currency_code": "Currency",
-                                    "Max_Aging": "Max Aging (days)"})
-            _p = _p[["Product", "Product Class", "Currency", "Lines",
-                     "Outstanding", "Max Aging (days)", "RAG"]]
+            _p = _p.sort_values("OS", ascending=False)
+            _p["Outstanding (INR)"] = _p["OS"].apply(fmt_inr)
+            _p = _p.rename(columns={"item_name": "Product", "Max_Aging": "Max Aging (days)"})
+            _p = _p[["Product", "Product Class", "Lines",
+                     "Outstanding (INR)", "Max Aging (days)", "RAG"]]
             _themed_table(_p, col_color=lambda n: _CLASS_COLORS.get(n) if n == "Product Class" else None,
                           height=460)
+
+            _dl = pdf.drop(columns=[c for c in ["_r"] if c in pdf.columns], errors="ignore")
             st.download_button(
                 "⬇ Download Product Classification",
-                data=export_excel(pdf.drop(columns=[c for c in ["_r"] if c in pdf.columns], errors="ignore")),
+                data=export_excel(_dl),
                 file_name="product_classification.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
-
-            # ── Unidentified lines to review ──────────────────────────────────────
-            if _n_unid:
-                with st.expander(f"⚠️ Unidentified lines ({_n_unid})", expanded=False):
-                    _u_cols = [c for c in ["invoice_number", "customer_name", "item_name",
-                                           "item_description", "currency_code", "outstanding_amount"]
-                               if c in pdf.columns]
-                    _themed_table(pdf[pdf["Product Class"] == "Unidentified"][_u_cols], height=320)
