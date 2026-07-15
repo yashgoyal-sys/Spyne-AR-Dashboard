@@ -2698,13 +2698,12 @@ def classify_product(item_name: str, description: str = "") -> str:
     key = _norm_name(item_name)
     if key and key in _PRODUCT_CLASS_NORM:
         return _PRODUCT_CLASS_NORM[key]
-    # Blank / unknown item_name → classify by description keywords
+    # Blank / unknown item_name → classify by description keywords.
+    # Anything not clearly Vini defaults to Studio (no Unidentified bucket).
     blob = f"{item_name} {description}".lower()
     if "vini" in blob or "inbound" in blob or "outbound" in blob:
         return "Vini"
-    if any(k in blob for k in ("touch", "pro ", "studio", "setup", "one time", "one-time")):
-        return "Studio"
-    return "Unidentified"
+    return "Studio"
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_product_sheet() -> pd.DataFrame:
