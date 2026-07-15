@@ -3680,16 +3680,31 @@ if tab_overview is not None:
                 st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
 
         with c4:
-            if "Product" in fdf.columns:
-                product_data = (fdf.groupby("Product")["Final USD"].sum()
-                                  .reset_index()
-                                  .sort_values("Final USD", ascending=False)
-                                  .head(10))
-                fig = px.bar(product_data, x="Final USD", y="Product",
-                             orientation="h", title="Top 10 Products by Outstanding",
-                             text_auto=",.0f")
-                fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="")
-                st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
+            # Top products by outstanding — sourced from the Combined Invoices product
+            # sheet (base data has no Product column). Shown in the dominant currency
+            # to avoid mixing currencies.
+            _ov_pdf = load_product_sheet()
+            if (_ov_pdf is not None and not _ov_pdf.empty
+                    and "item_name" in _ov_pdf.columns and "outstanding_amount" in _ov_pdf.columns):
+                _pos = _ov_pdf[_ov_pdf["outstanding_amount"] > 0]
+                if not _pos.empty:
+                    _cur = _pos.groupby("currency_code")["outstanding_amount"].sum().idxmax()
+                    _top = (_pos[_pos["currency_code"] == _cur]
+                            .groupby("item_name")["outstanding_amount"].sum()
+                            .reset_index()
+                            .sort_values("outstanding_amount", ascending=False)
+                            .head(10))
+                    fig = px.bar(_top, x="outstanding_amount", y="item_name",
+                                 orientation="h",
+                                 title=f"Top 10 Products by Outstanding ({_cur})",
+                                 text_auto=",.0f")
+                    fig.update_layout(yaxis=dict(autorange="reversed"), yaxis_title="",
+                                      xaxis_title=f"Outstanding ({_cur})")
+                    st.plotly_chart(_fmt_fig(fig), use_container_width=True, theme=None)
+                else:
+                    st.caption("No product-level outstanding to display.")
+            else:
+                st.caption("Product data unavailable — check the Combined Invoices sheet.")
 
         # ── Currency-wise outstanding (FC) with RAG ───────────────────────────────
         if "currency_code" in fdf.columns and "balance" in fdf.columns and "RAG" in fdf.columns:
