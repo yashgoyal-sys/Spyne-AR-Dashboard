@@ -2673,6 +2673,88 @@ def load_autopay_customers() -> set:
         return set()
 
 
+# ── Product-level sheet (line items) + Studio/Vini classification ─────────────
+_PRODUCT_SHEET_ID = "1y2Xs0HsJtwO4DRkUoWA7a_2KP-ygXXTO4iue6looDws"
+_PRODUCT_GID      = "127201515"
+
+# item_name → Studio / Vini  (per the Product Classification mapping)
+_PRODUCT_CLASS_MAP = {
+    "One Time Fees": "Studio", "one time setup fee": "Studio",
+    "Pro Half-Yearly": "Studio", "Pro Monthly": "Studio", "Pro Montly": "Studio",
+    "Pro Quarterly": "Studio", "Pro Yearly": "Studio",
+    "Spyne - Touch": "Studio", "Spyne Touch": "Studio",
+    "Spyne Touch - Over-Usage": "Studio", "Spyne Touch - Overusages": "Studio",
+    "Inbound Sales Quarterly": "Vini", "Inbound Sales Yearly": "Vini",
+    "Inbound Service Quarterly": "Vini", "Inbound Service Yearly": "Vini",
+    "Outbound Sales Quarterly": "Vini", "Outbound Service Quarterly": "Vini",
+    "VINI AI": "Vini",
+}
+_PRODUCT_CLASS_NORM = {_norm_name(k): v for k, v in _PRODUCT_CLASS_MAP.items()}
+
+def classify_product(item_name: str, description: str = "") -> str:
+    """Return 'Studio' | 'Vini' | 'Unidentified' for a line item."""
+    key = _norm_name(item_name)
+    if key and key in _PRODUCT_CLASS_NORM:
+        return _PRODUCT_CLASS_NORM[key]
+    # Blank / unknown item_name → classify by description keywords
+    blob = f"{item_name} {description}".lower()
+    if "vini" in blob or "inbound" in blob or "outbound" in blob:
+        return "Vini"
+    if any(k in blob for k in ("touch", "pro ", "studio", "setup", "one time", "one-time")):
+        return "Studio"
+    return "Unidentified"
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_product_sheet() -> pd.DataFrame:
+    """Load the product/line-item sheet, classify each line Studio/Vini, and
+    compute aging + per-line RAG. Empty DataFrame on failure."""
+    try:
+        url = (f"https://docs.google.com/spreadsheets/d/{_PRODUCT_SHEET_ID}"
+               f"/export?format=csv&gid={_PRODUCT_GID}")
+        df = pd.read_csv(BytesIO(requests.get(url, timeout=25).content))
+    except Exception:
+        return pd.DataFrame()
+    if df.empty:
+        return df
+
+    df.columns = [str(c).strip() for c in df.columns]
+    # Numeric outstanding
+    if "outstanding_amount" in df.columns:
+        df["outstanding_amount"] = pd.to_numeric(
+            df["outstanding_amount"].astype(str).str.replace(",", "", regex=False),
+            errors="coerce").fillna(0)
+
+    # Classification
+    df["Product Class"] = df.apply(
+        lambda r: classify_product(r.get("item_name", ""), r.get("item_description", "")),
+        axis=1)
+
+    # Aging: today - service_start (fallback invoice_date), clipped ≥0
+    today = pd.Timestamp.today().normalize()
+    _sd = pd.to_datetime(df.get("service_start_date"), errors="coerce", dayfirst=True)
+    _id = pd.to_datetime(df.get("invoice_date"),      errors="coerce", dayfirst=True)
+    eff = _sd.fillna(_id)
+    df["Aging"] = (today - eff).dt.days.clip(lower=0).fillna(0).astype(int)
+
+    def _bucket(a):
+        if a <= 15: return "0-15"
+        if a <= 30: return "16-30"
+        if a <= 45: return "31-45"
+        if a <= 60: return "46-60"
+        if a <= 90: return "61-90"
+        return "90+"
+    df["Bucket"] = df["Aging"].apply(_bucket)
+    # Per-line RAG (only lines with outstanding > 0 count as at-risk)
+    def _rag(row):
+        if row.get("outstanding_amount", 0) <= 0: return "Green"
+        a = row["Aging"]
+        if a > 90: return "Red"
+        if a > 30: return "Amber"
+        return "Green"
+    df["RAG"] = df.apply(_rag, axis=1)
+    return df
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_gsheet_private(url: str, creds_json: str) -> bytes:
     """Download a private Google Sheet using a service-account JSON string. Cached 2 min."""
@@ -3169,6 +3251,8 @@ with _refresh_col:
     if _can("refresh_data"):
         if st.button("🔄 Refresh", use_container_width=True, type="primary"):
             fetch_gsheet.clear()
+            load_autopay_customers.clear()
+            load_product_sheet.clear()
             st.session_state.pop("_gs_file_bytes", None)
             st.session_state["_gs_last_refresh"] = None
             st.rerun()
@@ -3482,6 +3566,7 @@ _TAB_DEFS = [
     ("tab_invoices",  "🔍 Invoice Drilldown",  "invoice_drilldown"),
     ("tab_reasons",   "📝 Reasons & Actions",  "view_reasons"),
     ("tab_email",     "📧 Send Reminders",     "send_reminders"),
+    ("tab_product",   "🧩 Product Classification", None),
 ]
 _visible_defs = [(var, lbl) for var, lbl, perm in _TAB_DEFS if perm is None or _can(perm)]
 _tab_widgets  = st.tabs([lbl for _, lbl in _visible_defs])
@@ -3493,6 +3578,7 @@ tab_customer = _tab_map.get("tab_customer")   # always present
 tab_invoices = _tab_map.get("tab_invoices")   # None for management
 tab_reasons  = _tab_map.get("tab_reasons")    # None for management
 tab_email    = _tab_map.get("tab_email")      # None for viewer / csm / management
+tab_product  = _tab_map.get("tab_product")    # Product Studio/Vini classification
 
 # ─────────────────────────── TAB 1 · OVERVIEW ────────────────────────────────
 if tab_overview is not None:
@@ -4971,3 +5057,103 @@ if tab_email is not None:
                 )
             else:
                 st.info("No emails sent yet.")
+
+
+# ─────────────────────── TAB · PRODUCT CLASSIFICATION ────────────────────────
+if tab_product is not None:
+    with tab_product:
+        st.markdown("Product-level outstanding & RAG, classified into "
+                    "**Studio** / **Vini** per the product mapping. "
+                    "Lines that match neither the item nor a description keyword are "
+                    "flagged **Unidentified**. Refreshes with the base data.")
+
+        pdf = load_product_sheet()
+        if pdf is None or pdf.empty:
+            st.info("Product sheet could not be loaded. Click 🔄 Refresh, and ensure the "
+                    "sheet is shared as 'Anyone with the link can view'.")
+        else:
+            _CLASS_COLORS = {"Studio": "#3b82f6", "Vini": "#a855f7", "Unidentified": "#f59e0b"}
+            _n_lines = len(pdf)
+            _n_studio = int((pdf["Product Class"] == "Studio").sum())
+            _n_vini   = int((pdf["Product Class"] == "Vini").sum())
+            _n_unid   = int((pdf["Product Class"] == "Unidentified").sum())
+
+            k = st.columns(4)
+            for _c, (_lbl, _val, _clr) in zip(k, [
+                ("Line Items",   f"{_n_lines:,}",  "#38bdf8"),
+                ("Studio Lines", f"{_n_studio:,}", _CLASS_COLORS["Studio"]),
+                ("Vini Lines",   f"{_n_vini:,}",   _CLASS_COLORS["Vini"]),
+                ("Unidentified", f"{_n_unid:,}",   _CLASS_COLORS["Unidentified"]),
+            ]):
+                _c.markdown(
+                    f"<div class='kpi-card'>"
+                    f"<div class='kpi-label' style='margin-top:0;margin-bottom:9px;'>{_lbl}</div>"
+                    f"<div class='kpi-value' style='color:{_clr};'>{_val}</div></div>",
+                    unsafe_allow_html=True)
+
+            if _n_unid:
+                st.warning(f"⚠️ {_n_unid} line(s) are **Unidentified** — review them below and "
+                           f"update the mapping so they classify correctly.")
+
+            st.divider()
+
+            # ── Outstanding by Product Class (per currency — currencies are not mixed) ─
+            st.subheader("Outstanding by Product Class")
+            _g = (pdf.groupby(["Product Class", "currency_code"])
+                     .agg(Lines=("item_name", "count"),
+                          Outstanding=("outstanding_amount", "sum"))
+                     .reset_index())
+            _g = _g[_g["Outstanding"] != 0].sort_values(
+                ["Product Class", "Outstanding"], ascending=[True, False])
+            _g["Outstanding"] = _g.apply(
+                lambda r: fmt_amount(r["Outstanding"], r["currency_code"]), axis=1)
+            _g = _g.rename(columns={"currency_code": "Currency"})
+            _themed_table(_g, height=320)
+
+            # ── RAG on product level (line counts by class × RAG) ─────────────────
+            st.subheader("RAG Status by Product Class")
+            _rag_ct = (pdf.groupby(["Product Class", "RAG"])
+                          .size().reset_index(name="Lines"))
+            fig_pc = px.bar(
+                _rag_ct, x="Product Class", y="Lines", color="RAG",
+                color_discrete_map=RAG_COLORS,
+                category_orders={"RAG": ["Green", "Amber", "Red"]},
+                title="Line items by Product Class & RAG", text_auto=True,
+            )
+            fig_pc.update_layout(legend_title="RAG", xaxis_title="", yaxis_title="Lines")
+            st.plotly_chart(_fmt_fig(fig_pc), use_container_width=True, theme=None)
+
+            # ── Product-level outstanding table (by item_name) ────────────────────
+            st.subheader("Product-Level Outstanding")
+            _rag_rank = {"Green": 1, "Amber": 2, "Red": 3}
+            _p = (pdf.assign(_r=pdf["RAG"].map(_rag_rank).fillna(1))
+                     .groupby(["item_name", "Product Class", "currency_code"])
+                     .agg(Lines=("item_name", "count"),
+                          Outstanding=("outstanding_amount", "sum"),
+                          Max_Aging=("Aging", "max"),
+                          _worst=("_r", "max"))
+                     .reset_index())
+            _p["RAG"] = _p["_worst"].map({1: "Green", 2: "Amber", 3: "Red"})
+            _p = _p.sort_values("Outstanding", ascending=False)
+            _p["Outstanding"] = _p.apply(
+                lambda r: fmt_amount(r["Outstanding"], r["currency_code"]), axis=1)
+            _p = _p.rename(columns={"item_name": "Product", "currency_code": "Currency",
+                                    "Max_Aging": "Max Aging (days)"})
+            _p = _p[["Product", "Product Class", "Currency", "Lines",
+                     "Outstanding", "Max Aging (days)", "RAG"]]
+            _themed_table(_p, col_color=lambda n: _CLASS_COLORS.get(n) if n == "Product Class" else None,
+                          height=460)
+            st.download_button(
+                "⬇ Download Product Classification",
+                data=export_excel(pdf.drop(columns=[c for c in ["_r"] if c in pdf.columns], errors="ignore")),
+                file_name="product_classification.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            # ── Unidentified lines to review ──────────────────────────────────────
+            if _n_unid:
+                with st.expander(f"⚠️ Unidentified lines ({_n_unid})", expanded=False):
+                    _u_cols = [c for c in ["invoice_number", "customer_name", "item_name",
+                                           "item_description", "currency_code", "outstanding_amount"]
+                               if c in pdf.columns]
+                    _themed_table(pdf[pdf["Product Class"] == "Unidentified"][_u_cols], height=320)
