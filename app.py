@@ -2060,7 +2060,27 @@ def remap_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Loading data…")
 def load_data(file_bytes):
-    df = pd.read_excel(BytesIO(file_bytes))
+    # The Google xlsx export contains EVERY tab (gid is ignored for xlsx), so the
+    # first sheet is no longer guaranteed to be the invoice data (e.g. after the
+    # "Customer on Auto Pay" tab was added). Pick the sheet that actually looks
+    # like the invoice dataset instead of blindly taking sheet 0.
+    try:
+        _all = pd.read_excel(BytesIO(file_bytes), sheet_name=None)
+    except Exception:
+        _all = None
+
+    if isinstance(_all, dict) and _all:
+        def _score(_d):
+            cols = [str(c).strip().lower() for c in _d.columns]
+            joined = " ".join(cols)
+            hits = sum(k in joined for k in
+                       ("invoice", "outstanding", "balance", "customer", "due", "aging", "csm"))
+            return (hits, len(_d.columns), len(_d))
+        # Prefer sheets that look like invoice data; fall back to the richest sheet
+        best = max(_all.values(), key=_score)
+        df = best.copy()
+    else:
+        df = pd.read_excel(BytesIO(file_bytes))
 
     # Normalise column names: strip whitespace, remove non-breaking spaces
     df.columns = [str(c).strip().replace("\xa0", " ") for c in df.columns]
