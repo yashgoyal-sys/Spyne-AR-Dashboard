@@ -1716,8 +1716,11 @@ def _sentlog_ws():
         if "gcp_service_account" not in st.secrets:
             return None
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        creds = Credentials.from_service_account_info(
-            dict(st.secrets["gcp_service_account"]), scopes=scopes)
+        _sa = dict(st.secrets["gcp_service_account"])
+        # Normalise escaped newlines in the private key (common Streamlit-secrets issue)
+        if _sa.get("private_key"):
+            _sa["private_key"] = _sa["private_key"].replace("\\n", "\n")
+        creds = Credentials.from_service_account_info(_sa, scopes=scopes)
         gc = gspread.authorize(creds)
         sheet_id, _ = parse_gsheet_url(_FIXED_SHEET_URL)
         sh = gc.open_by_key(sheet_id)
@@ -4810,6 +4813,8 @@ if tab_email is not None:
                             st.error(f"❌ Secret is missing keys: {_missing}")
                             st.stop()
                         st.caption(f"Service account: `{_sa.get('client_email')}`")
+                        if _sa.get("private_key"):
+                            _sa["private_key"] = _sa["private_key"].replace("\\n", "\n")
                         _creds = Credentials.from_service_account_info(
                             _sa, scopes=["https://www.googleapis.com/auth/spreadsheets"])
                         _gc = gspread.authorize(_creds)
