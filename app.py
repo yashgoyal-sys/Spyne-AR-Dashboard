@@ -5250,7 +5250,7 @@ if tab_product is not None:
             _f["Vini O/s"]   = _f["Vini"].apply(fmt_inr)
             _cust_show = _f[["Customer Name", "Enterprise ID", "No. of O/s Invoice",
                              "Total O/s", "Studio O/s", "Vini O/s", "Avg. Aging (days)"]]
-            _themed_table(_cust_show, height=460)
+            st.dataframe(_cust_show, use_container_width=True, hide_index=True, height=460)
 
             st.download_button(
                 "⬇ Download Customer Outstanding",
@@ -5299,4 +5299,4 @@ if tab_product is not None:
                                       "Products", "Class", "Outstanding (INR)", "Aging (days)", "RAG"]]
                     st.markdown(f"**{_sel_cust}** — {len(_inv_show)} outstanding invoice(s), "
                                 f"total {fmt_inr(_sub['O/S INR'].sum())}")
-                    _themed_table(_inv_show, height=400)
+                    st.dataframe(_inv_show, use_container_width=True, hide_index=True, height=400)
