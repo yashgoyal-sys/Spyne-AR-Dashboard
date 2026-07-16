@@ -2715,10 +2715,12 @@ def derive_inr_rates(base_df) -> dict:
     return rates
 
 def product_outstanding_inr(pdf: pd.DataFrame, rates: dict) -> pd.Series:
-    """Convert each product line's outstanding_amount to INR using base rates."""
+    """Convert each line's outstanding (os_amount = line_total_incl_tax for
+    overdue/sent lines) to INR using base rates."""
     cur = pdf["currency_code"].astype(str).str.upper().str.strip()
     rate = cur.map(rates).fillna(0)   # unmapped currency → 0 (avoids NaN in totals)
-    return pd.to_numeric(pdf["outstanding_amount"], errors="coerce").fillna(0) * rate
+    _basis = pdf["os_amount"] if "os_amount" in pdf.columns else pdf.get("outstanding_amount", 0)
+    return pd.to_numeric(_basis, errors="coerce").fillna(0) * rate
 
 def classify_product(item_name: str, description: str = "") -> str:
     """Return 'Studio' | 'Vini' | 'Unidentified' for a line item."""
@@ -2753,11 +2755,21 @@ def load_product_sheet() -> pd.DataFrame:
         return df
 
     df.columns = [str(c).strip() for c in df.columns]
-    # Numeric outstanding
+
+    # ── Line-level outstanding ────────────────────────────────────────────────
+    # NOTE: outstanding_amount is INVOICE-level and repeats on every line of the
+    # same invoice, so summing it double-counts. The true product/line outstanding
+    # is line_total_incl_tax, counted ONLY when the invoice is unpaid (overdue/sent).
+    def _num(col):
+        return pd.to_numeric(df[col].astype(str).str.replace(",", "", regex=False),
+                             errors="coerce").fillna(0) if col in df.columns else 0
+    _line_amt = _num("line_total_incl_tax")
+    _status   = df["status"].astype(str).str.lower().str.strip() if "status" in df.columns else ""
+    _open     = _status.isin(["overdue", "sent"]) if hasattr(_status, "isin") else False
+    df["os_amount"] = _line_amt.where(_open, 0) if hasattr(_status, "isin") else _line_amt
+    # keep the raw invoice-level value available but do not use it for sums
     if "outstanding_amount" in df.columns:
-        df["outstanding_amount"] = pd.to_numeric(
-            df["outstanding_amount"].astype(str).str.replace(",", "", regex=False),
-            errors="coerce").fillna(0)
+        df["outstanding_amount"] = _num("outstanding_amount")
 
     # Classification
     df["Product Class"] = df.apply(
@@ -2779,9 +2791,9 @@ def load_product_sheet() -> pd.DataFrame:
         if a <= 90: return "61-90"
         return "90+"
     df["Bucket"] = df["Aging"].apply(_bucket)
-    # Per-line RAG (only lines with outstanding > 0 count as at-risk)
+    # Per-line RAG — only lines that actually carry outstanding (overdue/sent) count
     def _rag(row):
-        if row.get("outstanding_amount", 0) <= 0: return "Green"
+        if row.get("os_amount", 0) <= 0: return "Green"
         a = row["Aging"]
         if a > 90: return "Red"
         if a > 30: return "Amber"
@@ -5169,7 +5181,7 @@ if tab_product is not None:
                 with st.expander("Per-currency breakdown"):
                     _g = (pdf.groupby(["Product Class", "currency_code"])
                              .agg(Lines=("item_name", "count"),
-                                  Outstanding=("outstanding_amount", "sum"))
+                                  Outstanding=("os_amount", "sum"))
                              .reset_index())
                     _g = _g[_g["Outstanding"] != 0].sort_values(
                         ["Product Class", "Outstanding"], ascending=[True, False])
