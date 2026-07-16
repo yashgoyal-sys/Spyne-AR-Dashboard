@@ -5244,14 +5244,22 @@ if tab_product is not None:
             if _minl > 0:         _f = _f[_f["Total"] >= _minl * 100000]
             st.caption(f"{len(_f)} of {len(_cust)} customers")
 
-            _inr_full = lambda v: "₹" + _indian_commas(v)
-            _f = _f.rename(columns={"customer_name": "Customer Name"})
-            _f["Total O/s"]  = _f["Total"].apply(_inr_full)
-            _f["Studio O/s"] = _f["Studio"].apply(_inr_full)
-            _f["Vini O/s"]   = _f["Vini"].apply(_inr_full)
+            # Numeric money columns so header-sort is numeric (not lexical on ₹ text)
+            _f = _f.rename(columns={"customer_name": "Customer Name",
+                                    "Total": "Total O/s (₹)", "Studio": "Studio O/s (₹)",
+                                    "Vini": "Vini O/s (₹)"})
+            for _mc in ["Total O/s (₹)", "Studio O/s (₹)", "Vini O/s (₹)"]:
+                _f[_mc] = _f[_mc].round(0).astype("int64")
             _cust_show = _f[["Customer Name", "Enterprise ID", "No. of O/s Invoice",
-                             "Total O/s", "Studio O/s", "Vini O/s", "Avg. Aging (days)"]]
-            st.dataframe(_cust_show, use_container_width=True, hide_index=True, height=460)
+                             "Total O/s (₹)", "Studio O/s (₹)", "Vini O/s (₹)",
+                             "Avg. Aging (days)"]]
+            st.dataframe(
+                _cust_show, use_container_width=True, hide_index=True, height=460,
+                column_config={
+                    "Total O/s (₹)":  st.column_config.NumberColumn(format="localized"),
+                    "Studio O/s (₹)": st.column_config.NumberColumn(format="localized"),
+                    "Vini O/s (₹)":   st.column_config.NumberColumn(format="localized"),
+                })
 
             st.download_button(
                 "⬇ Download Customer Outstanding",
@@ -5294,10 +5302,14 @@ if tab_product is not None:
                         return f"{s} → {e}".strip(" →") or "—"
                     _inv["Invoice Period"] = _inv.apply(_period, axis=1)
                     _inv = _inv.sort_values("_os", ascending=False)
-                    _inv["Outstanding (INR)"] = _inv["_os"].apply(lambda v: "₹" + _indian_commas(v))
+                    _inv["Outstanding (₹)"] = _inv["_os"].round(0).astype("int64")
                     _inv = _inv.rename(columns={"invoice_number": "Invoice No."})
                     _inv_show = _inv[["Invoice No.", "Invoice Date", "Invoice Period", "Status",
-                                      "Products", "Class", "Outstanding (INR)", "Aging (days)", "RAG"]]
+                                      "Products", "Class", "Outstanding (₹)", "Aging (days)", "RAG"]]
                     st.markdown(f"**{_sel_cust}** — {len(_inv_show)} outstanding invoice(s), "
                                 f"total ₹{_indian_commas(_sub['O/S INR'].sum())}")
-                    st.dataframe(_inv_show, use_container_width=True, hide_index=True, height=400)
+                    st.dataframe(
+                        _inv_show, use_container_width=True, hide_index=True, height=400,
+                        column_config={
+                            "Outstanding (₹)": st.column_config.NumberColumn(format="localized"),
+                        })
