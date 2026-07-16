@@ -5223,12 +5223,33 @@ if tab_product is not None:
             _cust["Avg. Aging (days)"]  = _cust["customer_name"].map(_avga).fillna(0).round(0).astype(int)
             _cust = _cust[_cust["Total"] > 0].sort_values("Total", ascending=False)
 
-            _cust["Total O/s"]  = _cust["Total"].apply(fmt_inr)
-            _cust["Studio O/s"] = _cust["Studio"].apply(fmt_inr)
-            _cust["Vini O/s"]   = _cust["Vini"].apply(fmt_inr)
-            _cust = _cust.rename(columns={"customer_name": "Customer Name"})
-            _cust_show = _cust[["Customer Name", "Enterprise ID", "No. of O/s Invoice",
-                                "Total O/s", "Studio O/s", "Vini O/s", "Avg. Aging (days)"]]
+            # ── Filters ───────────────────────────────────────────────────────────
+            fc1, fc2, fc3 = st.columns([2, 1, 1])
+            with fc1:
+                _q = st.text_input("🔍 Search customer / Enterprise ID",
+                                   placeholder="Type to filter…", key="cust_os_q").strip()
+            with fc2:
+                _clsf = st.radio("Product", ["All", "Studio", "Vini"],
+                                 horizontal=True, key="cust_os_cls")
+            with fc3:
+                _minl = st.number_input("Min Total O/s (₹ Lakh)", min_value=0.0,
+                                        value=0.0, step=1.0, key="cust_os_min")
+
+            _f = _cust.copy()
+            if _q:
+                _f = _f[_f["customer_name"].str.contains(_q, case=False, na=False)
+                        | _f["Enterprise ID"].astype(str).str.contains(_q, case=False, na=False)]
+            if _clsf == "Studio": _f = _f[_f["Studio"] > 0]
+            elif _clsf == "Vini": _f = _f[_f["Vini"] > 0]
+            if _minl > 0:         _f = _f[_f["Total"] >= _minl * 100000]
+            st.caption(f"{len(_f)} of {len(_cust)} customers")
+
+            _f = _f.rename(columns={"customer_name": "Customer Name"})
+            _f["Total O/s"]  = _f["Total"].apply(fmt_inr)
+            _f["Studio O/s"] = _f["Studio"].apply(fmt_inr)
+            _f["Vini O/s"]   = _f["Vini"].apply(fmt_inr)
+            _cust_show = _f[["Customer Name", "Enterprise ID", "No. of O/s Invoice",
+                             "Total O/s", "Studio O/s", "Vini O/s", "Avg. Aging (days)"]]
             _themed_table(_cust_show, height=460)
 
             st.download_button(
@@ -5237,3 +5258,38 @@ if tab_product is not None:
                 file_name="customer_outstanding.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
+
+            # ── Drill-down: invoice-level detail for a selected customer ──────────
+            st.markdown("###### 🔎 Drill down to invoice level")
+            _sel_cust = st.selectbox(
+                "Select a customer", ["— select —"] + _f["Customer Name"].tolist(),
+                key="cust_drill", label_visibility="collapsed")
+            if _sel_cust and _sel_cust != "— select —":
+                _sub = pdf[(pdf["customer_name"] == _sel_cust) & (pdf["os_amount"] > 0)].copy()
+                if _sub.empty:
+                    st.info("No outstanding (overdue/sent) invoices for this customer.")
+                else:
+                    _rr = {"Green": 1, "Amber": 2, "Red": 3}
+                    _inv = (_sub.assign(_r=_sub["RAG"].map(_rr).fillna(1))
+                                .groupby("invoice_number")
+                                .agg(**{
+                                    "Invoice Date":  ("invoice_date", "first"),
+                                    "Status":        ("status", "first"),
+                                    "Products":      ("item_name",
+                                                      lambda s: ", ".join(sorted({str(x) for x in s.dropna()}))),
+                                    "Class":         ("Product Class",
+                                                      lambda s: ", ".join(sorted(set(s)))),
+                                    "_os":           ("O/S INR", "sum"),
+                                    "Aging (days)":  ("Aging", "max"),
+                                    "_worst":        ("_r", "max"),
+                                })
+                                .reset_index())
+                    _inv["RAG"] = _inv["_worst"].map({1: "Green", 2: "Amber", 3: "Red"})
+                    _inv = _inv.sort_values("_os", ascending=False)
+                    _inv["Outstanding (INR)"] = _inv["_os"].apply(fmt_inr)
+                    _inv = _inv.rename(columns={"invoice_number": "Invoice No."})
+                    _inv_show = _inv[["Invoice No.", "Invoice Date", "Status", "Products",
+                                      "Class", "Outstanding (INR)", "Aging (days)", "RAG"]]
+                    st.markdown(f"**{_sel_cust}** — {len(_inv_show)} outstanding invoice(s), "
+                                f"total {fmt_inr(_sub['O/S INR'].sum())}")
+                    _themed_table(_inv_show, height=400)
