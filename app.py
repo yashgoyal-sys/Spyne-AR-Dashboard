@@ -5274,6 +5274,8 @@ if tab_product is not None:
                                 .groupby("invoice_number")
                                 .agg(**{
                                     "Invoice Date":  ("invoice_date", "first"),
+                                    "_svc_s":        ("service_start_date", "first"),
+                                    "_svc_e":        ("service_end_date", "first"),
                                     "Status":        ("status", "first"),
                                     "Products":      ("item_name",
                                                       lambda s: ", ".join(sorted({str(x) for x in s.dropna()}))),
@@ -5285,11 +5287,16 @@ if tab_product is not None:
                                 })
                                 .reset_index())
                     _inv["RAG"] = _inv["_worst"].map({1: "Green", 2: "Amber", 3: "Red"})
+                    def _period(r):
+                        s = str(r["_svc_s"])[:11] if pd.notna(r["_svc_s"]) else ""
+                        e = str(r["_svc_e"])[:11] if pd.notna(r["_svc_e"]) else ""
+                        return f"{s} → {e}".strip(" →") or "—"
+                    _inv["Invoice Period"] = _inv.apply(_period, axis=1)
                     _inv = _inv.sort_values("_os", ascending=False)
                     _inv["Outstanding (INR)"] = _inv["_os"].apply(fmt_inr)
                     _inv = _inv.rename(columns={"invoice_number": "Invoice No."})
-                    _inv_show = _inv[["Invoice No.", "Invoice Date", "Status", "Products",
-                                      "Class", "Outstanding (INR)", "Aging (days)", "RAG"]]
+                    _inv_show = _inv[["Invoice No.", "Invoice Date", "Invoice Period", "Status",
+                                      "Products", "Class", "Outstanding (INR)", "Aging (days)", "RAG"]]
                     st.markdown(f"**{_sel_cust}** — {len(_inv_show)} outstanding invoice(s), "
                                 f"total {fmt_inr(_sub['O/S INR'].sum())}")
                     _themed_table(_inv_show, height=400)
