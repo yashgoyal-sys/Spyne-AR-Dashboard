@@ -5202,29 +5202,38 @@ if tab_product is not None:
             fig_pc.update_layout(legend_title="RAG", xaxis_title="", yaxis_title="Lines")
             st.plotly_chart(_fmt_fig(fig_pc), use_container_width=True, theme=None)
 
-            # ── Product-level outstanding table (by item_name, in INR) ────────────
-            st.subheader("Product-Level Outstanding (INR)")
-            _rag_rank = {"Green": 1, "Amber": 2, "Red": 3}
-            _p = (pdf.assign(_r=pdf["RAG"].map(_rag_rank).fillna(1))
-                     .groupby(["item_name", "Product Class"])
-                     .agg(Lines=("item_name", "count"),
-                          OS=("O/S INR", "sum"),
-                          Max_Aging=("Aging", "max"),
-                          _worst=("_r", "max"))
-                     .reset_index())
-            _p["RAG"] = _p["_worst"].map({1: "Green", 2: "Amber", 3: "Red"})
-            _p = _p.sort_values("OS", ascending=False)
-            _p["Outstanding (INR)"] = _p["OS"].apply(fmt_inr)
-            _p = _p.rename(columns={"item_name": "Product", "Max_Aging": "Max Aging (days)"})
-            _p = _p[["Product", "Product Class", "Lines",
-                     "Outstanding (INR)", "Max Aging (days)", "RAG"]]
-            _themed_table(_p, col_color=lambda n: _CLASS_COLORS.get(n) if n == "Product Class" else None,
-                          height=460)
+            # ── Customer-level outstanding (INR), split by Studio / Vini ──────────
+            st.subheader("Customer-Level Outstanding (INR)")
+            _cg = pdf.copy()
+            _cg["_studio"] = _cg["O/S INR"].where(_cg["Product Class"] == "Studio", 0)
+            _cg["_vini"]   = _cg["O/S INR"].where(_cg["Product Class"] == "Vini",   0)
+            _open_lines = _cg[_cg["os_amount"] > 0]   # only outstanding lines for counts/aging
 
-            _dl = pdf.drop(columns=[c for c in ["_r"] if c in pdf.columns], errors="ignore")
+            _ent  = _cg.groupby("customer_name")["enterprise_id"].first()
+            _ninv = _open_lines.groupby("customer_name")["invoice_number"].nunique()
+            _avga = _open_lines.groupby("customer_name")["Aging"].mean()
+
+            _cust = (_cg.groupby("customer_name")
+                        .agg(Total=("O/S INR", "sum"),
+                             Studio=("_studio", "sum"),
+                             Vini=("_vini", "sum"))
+                        .reset_index())
+            _cust["Enterprise ID"]      = _cust["customer_name"].map(_ent)
+            _cust["No. of O/s Invoice"] = _cust["customer_name"].map(_ninv).fillna(0).astype(int)
+            _cust["Avg. Aging (days)"]  = _cust["customer_name"].map(_avga).fillna(0).round(0).astype(int)
+            _cust = _cust[_cust["Total"] > 0].sort_values("Total", ascending=False)
+
+            _cust["Total O/s"]  = _cust["Total"].apply(fmt_inr)
+            _cust["Studio O/s"] = _cust["Studio"].apply(fmt_inr)
+            _cust["Vini O/s"]   = _cust["Vini"].apply(fmt_inr)
+            _cust = _cust.rename(columns={"customer_name": "Customer Name"})
+            _cust_show = _cust[["Customer Name", "Enterprise ID", "No. of O/s Invoice",
+                                "Total O/s", "Studio O/s", "Vini O/s", "Avg. Aging (days)"]]
+            _themed_table(_cust_show, height=460)
+
             st.download_button(
-                "⬇ Download Product Classification",
-                data=export_excel(_dl),
-                file_name="product_classification.xlsx",
+                "⬇ Download Customer Outstanding",
+                data=export_excel(_cust_show),
+                file_name="customer_outstanding.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
